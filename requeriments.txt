@@ -1,0 +1,6 @@
+pandas
+polars
+scikit-learn
+scipy
+matplotlib
+rich
