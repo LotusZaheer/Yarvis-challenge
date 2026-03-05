@@ -220,9 +220,10 @@ def clean(df: pl.DataFrame) -> pl.DataFrame:
     _expected = ["hour", "day_of_week", "duration_sec", "transcript_text", "inconsistency_flag"]
     if CLEAN_CSV.exists():
         df_cached = pl.read_csv(CLEAN_CSV, infer_schema_length=5000)
-        if all(c in df_cached.columns for c in _expected):
+        if all(c in df_cached.columns for c in _expected) and df_cached.height == df.height:
             print(f"[INFO] Cache encontrado: {CLEAN_CSV.name} ({df_cached.height:,} filas)")
             return df_cached
+        print(f"[WARN] Cache invalido (filas: {df_cached.height:,} vs esperadas: {df.height:,}), recalculando...")
 
     df_original = df
     df = _parse_datetime(df)
