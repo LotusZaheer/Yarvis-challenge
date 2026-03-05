@@ -123,10 +123,12 @@ def analyze_sentiment(df: pl.DataFrame) -> pl.DataFrame:
     """
     if SENTIMENT_CACHE.exists():
         cached = pl.read_csv(SENTIMENT_CACHE)
-        df = df.join(cached.select(["call_url", "sentiment_own"]), on="call_url", how="left")
-        df = df.with_columns(pl.col("sentiment_own").fill_null("neutral"))
-        print(f"[INFO] Cache encontrado: {SENTIMENT_CACHE.name}")
-        return df
+        if cached.height == df.height:
+            df = df.join(cached.select(["call_url", "sentiment_own"]), on="call_url", how="left")
+            df = df.with_columns(pl.col("sentiment_own").fill_null("neutral"))
+            print(f"[INFO] Cache encontrado: {SENTIMENT_CACHE.name} ({cached.height:,} filas)")
+            return df
+        print(f"[WARN] Cache invalido (filas: {cached.height:,} vs esperadas: {df.height:,}), recalculando...")
 
     def _classify_text(txt: str | None) -> str:
         if txt is None:
