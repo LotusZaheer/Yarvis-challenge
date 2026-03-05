@@ -129,9 +129,13 @@ def analyze_contactability(df: pl.DataFrame) -> pl.DataFrame:
         FIGURES_DIR / "contactability_by_campaign.png",
         FIGURES_DIR / "contactability_heatmap.png",
     ]
-    if all(f.exists() for f in _figures):
+    # Validar que todas las figuras existen y tienen tamaño mínimo (5KB) para detectar corrupción
+    _MIN_SIZE_KB = 5
+    if all(f.exists() and f.stat().st_size > _MIN_SIZE_KB * 1024 for f in _figures):
         print("[INFO] Cache encontrado: figuras de contactabilidad ya existen")
         return df
+    if any(f.exists() for f in _figures):
+        print(f"[WARN] Figuras corruptas o incompletas, regenerando...")
 
     # --- Tasa por hora ---
     by_hour = _connection_rate(df, "hour").sort("hour")
