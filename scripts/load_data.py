@@ -7,7 +7,7 @@ Salida  : pd.DataFrame validado (listo para etapa de limpieza)
 import sys
 from pathlib import Path
 
-import pandas as pd
+import polars as pl
 
 # ---------------------------------------------------------------------------
 # Rutas
@@ -32,7 +32,7 @@ COLUMN_RENAME = {
 }
 
 
-def load_raw(path: Path = RAW_CSV) -> pd.DataFrame:
+def load_raw(path: Path = RAW_CSV) -> pl.DataFrame:
     """
     Lee el CSV con separador coma, renombra columnas a snake_case
     y ejecuta validaciones básicas de estructura.
@@ -40,23 +40,39 @@ def load_raw(path: Path = RAW_CSV) -> pd.DataFrame:
     if not path.exists():
         sys.exit(f"[ERROR] Archivo no encontrado: {path}")
 
-    df = pd.read_csv(path, sep=",", encoding="utf-8")
+    # Carga con polars indicando que "NULL" representa valor nulo
+    df = pl.read_csv(path, separator=",", null_values=["NULL", "NaN", "nan", ""])
 
     # --- Validar columnas esperadas ---
     missing = set(COLUMN_RENAME.keys()) - set(df.columns)
     if missing:
         sys.exit(f"[ERROR] Columnas faltantes en el CSV: {missing}")
 
-    df = df.rename(columns=COLUMN_RENAME)
+    # Renombrar
+    df = df.rename(COLUMN_RENAME)
+
+    # --- Columna derivada: llamada efectuada ---
+    # Si call_url tiene valor, la llamada logro conectar; si es nulo, no conecto
+    df = df.with_columns(
+        pl.col("call_url").is_not_null().alias("call_completed")
+    )
+
 
     # --- Reporte rápido ---
-    print(f"[INFO] Registros cargados : {len(df):,}")
-    print(f"[INFO] Columnas           : {list(df.columns)}")
+    print(f"[INFO] Registros cargados : {df.height:,}")
+    print(f"[INFO] Columnas           : {df.columns}")
+    
     print("\n[INFO] Tipos de dato:")
-    print(df.dtypes.to_string())
+    for col_name, dtype in zip(df.columns, df.dtypes):
+        print(f"{col_name}: {dtype}")
+        
     print("\n[INFO] Valores nulos por columna:")
-    print(df.isnull().sum().to_string())
-    print(f"\n[INFO] Conectadas (True)  : {df['connected'].sum() if df['connected'].dtype == bool else (df['connected'] == True).sum():,}")
+    nulls = df.null_count()
+    for col in df.columns:
+        print(f"{col}: {nulls[col][0]}")
+        
+    conectadas = df.filter(pl.col("connected") == True).height
+    print(f"\n[INFO] Conectadas (True)  : {conectadas:,}")
 
     return df
 
@@ -64,4 +80,4 @@ def load_raw(path: Path = RAW_CSV) -> pd.DataFrame:
 if __name__ == "__main__":
     df = load_raw()
     print("\n[OK] Carga completada.\n")
-    print(df.head(3).to_string())
+    print(df.head(3))

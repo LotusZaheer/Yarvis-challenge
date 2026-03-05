@@ -28,9 +28,9 @@ def mostrar_resumen(df):
     """Muestra un resumen general del DataFrame en consola."""
     # --- Panel de información general ---
     info_lines = [
-        f"[bold cyan]Registros totales:[/] {len(df):,}",
+        f"[bold cyan]Registros totales:[/] {df.height:,}",
         f"[bold cyan]Columnas:[/]         {len(df.columns)}",
-        f"[bold cyan]Memoria:[/]          {df.memory_usage(deep=True).sum() / 1024**2:.2f} MB",
+        f"[bold cyan]Memoria:[/]          {df.estimated_size() / 1024**2:.2f} MB",
     ]
     console.print(Panel(
         "\n".join(info_lines),
@@ -52,19 +52,20 @@ def mostrar_resumen(df):
     tabla_tipos.add_column("% Nulos", style="red", justify="right")
 
     for col in df.columns:
-        nulos = df[col].isnull().sum()
-        pct = f"{nulos / len(df) * 100:.1f}%"
+        nulos = df[col].null_count()
+        pct = f"{nulos / df.height * 100:.1f}%"
         tabla_tipos.add_row(col, str(df[col].dtype), f"{nulos:,}", pct)
 
     console.print(tabla_tipos)
 
     # --- Estadísticas de conexión ---
+    import polars as pl
     if "connected" in df.columns:
-        conectadas = (df["connected"] == True).sum()  # noqa: E712
-        no_conectadas = len(df) - conectadas
+        conectadas = df.filter(pl.col("connected") == True).height
+        no_conectadas = df.height - conectadas
         console.print(Panel(
-            f"[bold green]Conectadas:[/]    {conectadas:,}  ({conectadas/len(df)*100:.1f}%)\n"
-            f"[bold red]No conectadas:[/] {no_conectadas:,}  ({no_conectadas/len(df)*100:.1f}%)",
+            f"[bold green]Conectadas:[/]    {conectadas:,}  ({conectadas/df.height*100:.1f}%)\n"
+            f"[bold red]No conectadas:[/] {no_conectadas:,}  ({no_conectadas/df.height*100:.1f}%)",
             title="[bold blue]Estado de Conexion[/]",
             border_style="blue",
             padding=(1, 2),
@@ -88,8 +89,8 @@ def mostrar_muestra(df, n=5):
         tabla.add_column(col, max_width=max_w, overflow="ellipsis")
 
     # Agregar filas
-    for _, row in df.head(n).iterrows():
-        tabla.add_row(*[str(v) if str(v) != "nan" else "—" for v in row])
+    for row in df.head(n).iter_rows():
+        tabla.add_row(*[str(v) if v is not None and str(v) != "nan" else "—" for v in row])
 
     console.print(tabla)
 

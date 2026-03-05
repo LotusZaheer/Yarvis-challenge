@@ -1,5 +1,4 @@
 env/
 .claude/
-CLAUDE.md
 *.csv
 __pycache__

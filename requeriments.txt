@@ -1,6 +1,5 @@
-pandas
-polars
-scikit-learn
-scipy
-matplotlib
-rich
+polars>=1.38.1
+rich>=14.3.3
+scikit-learn>=1.8.0
+scipy>=1.17.1
+matplotlib>=3.10.8
