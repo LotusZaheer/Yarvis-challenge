@@ -49,10 +49,10 @@ Análisis de qué campaña contribuyó más a la eliminación
                     aviso       5,421            19         5,402        0.4%
                      otro       6,315            10         6,305        0.2%
                  cobranza       2,602             4         2,598        0.2%
-                    sales           4             0             4        0.0%
-                   upsell      14,448             0        14,448        0.0%
-         servicio_cliente       1,884             0         1,884        0.0%
                     promo         502             0           502        0.0%
+         servicio_cliente       1,884             0         1,884        0.0%
+                   upsell      14,448             0        14,448        0.0%
+                    sales           4             0             4        0.0%
                    prueba           4             0             4        0.0%
 
   Nota: Los registros eliminados son aquellos con hour==0

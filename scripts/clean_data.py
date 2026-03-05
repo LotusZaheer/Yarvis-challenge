@@ -211,6 +211,50 @@ def _export(df: pl.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _filter_outliers(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Filtra datos no útiles:
+    - Hora 0 (00:00–00:59)
+    - Campaña 'prueba'
+    - Outliers de duración usando método IQR
+    """
+
+    n_before = df.height
+
+    df = df.filter(pl.col("hour") != 0)
+    n_after_h0 = df.height
+
+    if "campaign_type" in df.columns:
+        df = df.filter(pl.col("campaign_type") != "prueba")
+    n_after_prueba = df.height
+
+    q1 = df.select(pl.col("duration_sec").quantile(0.25)).item()
+    q3 = df.select(pl.col("duration_sec").quantile(0.75)).item()
+    iqr = q3 - q1
+
+    lower = q1 - 1.5 * iqr
+    upper = q3 + 1.5 * iqr
+
+    df = df.filter(
+        (pl.col("duration_sec") >= lower) &
+        (pl.col("duration_sec") <= upper)
+    )
+
+    n_after_outliers = df.height
+
+    # Reporte
+    n_filtered = n_before - n_after_outliers
+
+    if n_filtered > 0:
+        pct = n_filtered / n_before * 100
+        print(f"[INFO] Filtro aplicado: {n_filtered:,} registros removidos ({pct:.2f}%)")
+        print(f"       → hora 0: {n_before - n_after_h0}")
+        print(f"       → campaña 'prueba': {n_after_h0 - n_after_prueba}")
+        print(f"       → outliers duración: {n_after_prueba - n_after_outliers}")
+
+    return df
+
+
 def clean(df: pl.DataFrame) -> pl.DataFrame:
     """
     Limpia y normaliza el DataFrame crudo.
@@ -218,12 +262,17 @@ def clean(df: pl.DataFrame) -> pl.DataFrame:
     No muta la entrada; retorna un nuevo DataFrame enriquecido.
     """
     _expected = ["hour", "day_of_week", "duration_sec", "transcript_text", "inconsistency_flag"]
+
+    # Cache check: validar que exista y tenga el tamaño esperado
+    # (después de filtrado: ~73,330 registros)
+    cache_min_size = 25000  # Aproximación tras filtrar hora 0 y prueba
     if CLEAN_CSV.exists():
         df_cached = pl.read_csv(CLEAN_CSV, infer_schema_length=5000)
-        if all(c in df_cached.columns for c in _expected) and df_cached.height == df.height:
+        if (all(c in df_cached.columns for c in _expected) and
+            df_cached.height > cache_min_size):
             print(f"[INFO] Cache encontrado: {CLEAN_CSV.name} ({df_cached.height:,} filas)")
             return df_cached
-        print(f"[WARN] Cache invalido (filas: {df_cached.height:,} vs esperadas: {df.height:,}), recalculando...")
+        print(f"[WARN] Cache invalido (filas: {df_cached.height:,}), recalculando...")
 
     df_original = df
     df = _parse_datetime(df)
@@ -232,6 +281,7 @@ def clean(df: pl.DataFrame) -> pl.DataFrame:
     df = _parse_post_call_analysis(df)
     df = _parse_transcript(df)
     df = _add_inconsistency_flag(df)
+    df = _filter_outliers(df)
     _validate(df_original, df)
     _export(df)
     return df
