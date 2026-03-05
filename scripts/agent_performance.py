@@ -1,0 +1,212 @@
+"""
+Script 06 - Análisis de desempeño del agente Yarvis (Tarea 3).
+Entrada : pl.DataFrame con sentiment_own y cluster_id
+Salida  : pl.DataFrame con columnas de flags de desempeño + figura en reports/figures/
+          (no exporta CSV separado; los hallazgos van al reporte)
+"""
+
+import re
+import sys
+from collections import Counter
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import polars as pl
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CLEAN_CSV = PROJECT_ROOT / "data" / "processed" / "calls_clean.csv"
+FIGURES_DIR = PROJECT_ROOT / "reports" / "figures"
+AGENT_CACHE = PROJECT_ROOT / "data" / "processed" / "cache_agent.csv"
+
+# Umbral de duración corta (segundos) para clasificar llamadas tipo "malentendido"
+SHORT_CALL_THRESHOLD_SEC = 30.0
+
+_RE_PUNCT = re.compile(r"[^\w\s]")
+_RE_ACCENTS = str.maketrans("áéíóúüñÁÉÍÓÚÜÑ", "aeiouunAEIOUUN")
+
+
+def _normalize_phrase(text: str) -> str:
+    return _RE_PUNCT.sub(" ", text.lower().translate(_RE_ACCENTS)).strip()
+
+
+def _extract_agent_lines(transcript: str) -> list[str]:
+    """Extrae utterances del agente del transcript."""
+    if not transcript:
+        return []
+    return [
+        line.strip()[6:].strip()
+        for line in transcript.split("\n")
+        if line.strip().startswith("Agent:")
+    ]
+
+
+def _has_repetitive_responses(transcript: str, min_repeat: int = 2) -> bool:
+    """Detecta si el agente repite la misma frase >= min_repeat veces."""
+    lines = _extract_agent_lines(transcript)
+    if len(lines) < min_repeat:
+        return False
+    normalized = [_normalize_phrase(l) for l in lines if len(l) > 20]
+    counts = Counter(normalized)
+    return any(c >= min_repeat for c in counts.values())
+
+
+def _detect_failures(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Añade 4 columnas booleanas de fallo al DataFrame.
+    Solo aplica sobre llamadas conectadas; el resto recibe False.
+    """
+    transcripts = df["transcript_text"].to_list()
+    durations = df["duration_sec"].to_list()
+    disconn = df["disconnected_reason"].to_list()
+    sentiments = df.get_column("sentiment_own").to_list() if "sentiment_own" in df.columns else [None] * df.height
+    razon_churn = df["pca_razon_churn"].to_list() if "pca_razon_churn" in df.columns else [None] * df.height
+    posible_rec = df["pca_posible_recuperacion"].to_list() if "pca_posible_recuperacion" in df.columns else [None] * df.height
+    connected = df["connected"].to_list()
+
+    fail_repetitive = []
+    fail_inactivity = []
+    fail_objection = []
+    fail_misunderstanding = []
+
+    for i in range(df.height):
+        if not connected[i]:
+            fail_repetitive.append(False)
+            fail_inactivity.append(False)
+            fail_objection.append(False)
+            fail_misunderstanding.append(False)
+            continue
+
+        txt = transcripts[i] or ""
+        dur = durations[i] or 0.0
+        disc = disconn[i] or ""
+        sent = sentiments[i] or "neutral"
+        churn = razon_churn[i]
+        rec = posible_rec[i]
+
+        # 1. Respuestas repetitivas del agente
+        fail_repetitive.append(_has_repetitive_responses(txt))
+
+        # 2. Inactividad (desconexión por timeout)
+        fail_inactivity.append(disc == "inactivity")
+
+        # 3. No manejo de objeciones:
+        #    hay razón de churn + sentimiento negativo + sin posible recuperación
+        fail_objection.append(
+            churn is not None
+            and sent == "negativo"
+            and (rec is None or str(rec).lower() in {"no", "no"})
+        )
+
+        # 4. Malentendido: llamada muy corta + usuario cuelga + sentimiento negativo
+        fail_misunderstanding.append(
+            dur < SHORT_CALL_THRESHOLD_SEC
+            and disc == "user_hangup"
+            and sent == "negativo"
+        )
+
+    df = df.with_columns([
+        pl.Series("fail_repetitive", fail_repetitive, dtype=pl.Boolean),
+        pl.Series("fail_inactivity", fail_inactivity, dtype=pl.Boolean),
+        pl.Series("fail_objection", fail_objection, dtype=pl.Boolean),
+        pl.Series("fail_misunderstanding", fail_misunderstanding, dtype=pl.Boolean),
+    ])
+    return df
+
+
+def _print_summary(df: pl.DataFrame) -> None:
+    """Imprime resumen de fallas detectadas."""
+    connected = df.filter(pl.col("connected") == True)
+    n = connected.height
+    if n == 0:
+        print("[WARN] No hay llamadas conectadas para analizar desempeño.")
+        return
+
+    failures = {
+        "Respuestas repetitivas": connected["fail_repetitive"].sum(),
+        "Inactividad (timeout)":  connected["fail_inactivity"].sum(),
+        "Sin manejo de objecion": connected["fail_objection"].sum(),
+        "Malentendido/llamada corta": connected["fail_misunderstanding"].sum(),
+    }
+    print(f"[INFO] Desempeno del agente ({n:,} llamadas conectadas):")
+    for label, count in failures.items():
+        print(f"       {label}: {count:,} ({count/n:.1%})")
+
+
+def _plot_failures(df: pl.DataFrame, out_path: Path):
+    """Gráfico de barras con frecuencia de cada tipo de falla."""
+    connected = df.filter(pl.col("connected") == True)
+    n = connected.height
+    labels = [
+        "Respuestas\nrepetitivas",
+        "Inactividad\n(timeout)",
+        "Sin manejo\nobjeción",
+        "Malentendido\nllamada corta",
+    ]
+    cols = ["fail_repetitive", "fail_inactivity", "fail_objection", "fail_misunderstanding"]
+    counts = [connected[c].sum() for c in cols]
+    pcts = [c / n for c in counts]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    bars = ax.bar(labels, pcts, color=["#F44336", "#FF9800", "#9C27B0", "#2196F3"], edgecolor="white")
+    ax.set_ylabel("% de llamadas conectadas")
+    ax.set_title("Patrones de Falla del Agente Yarvis", fontsize=13, fontweight="bold")
+    ax.yaxis.set_major_formatter(plt.matplotlib.ticker.PercentFormatter(1.0))
+    for bar, pct, count in zip(bars, pcts, counts):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.002,
+            f"{pct:.1%}\n({count:,})",
+            ha="center", va="bottom", fontsize=9,
+        )
+    ax.set_ylim(0, max(pcts) * 1.3 if any(p > 0 for p in pcts) else 0.1)
+    plt.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def analyze_agent_performance(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Detecta patrones de mal desempeño del agente.
+    Si cache_agent.csv ya existe, carga las columnas fail_* desde ahí (join por call_url).
+    Retorna df con columnas fail_* añadidas.
+    """
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    _fail_cols = ["fail_repetitive", "fail_inactivity", "fail_objection", "fail_misunderstanding"]
+    _figure = FIGURES_DIR / "agent_failures.png"
+
+    if AGENT_CACHE.exists():
+        cached = pl.read_csv(AGENT_CACHE)
+        df = df.join(cached.select(["call_url"] + _fail_cols), on="call_url", how="left")
+        for col in _fail_cols:
+            df = df.with_columns(pl.col(col).fill_null(False))
+        if not _figure.exists():
+            _plot_failures(df, _figure)
+        print(f"[INFO] Cache encontrado: {AGENT_CACHE.name}")
+        return df
+
+    df = _detect_failures(df)
+    _print_summary(df)
+    _plot_failures(df, _figure)
+    print(f"[INFO] Figura de desempeno guardada en: {_figure}")
+
+    # Guardar checkpoint (call_url + fail_*)
+    df.select(["call_url"] + _fail_cols).write_csv(AGENT_CACHE)
+
+    return df
+
+
+if __name__ == "__main__":
+    from sentiment_analysis import analyze_sentiment  # noqa: E402
+
+    df = pl.read_csv(CLEAN_CSV)
+    df = analyze_sentiment(df)
+    df = analyze_agent_performance(df)
+    print(df.filter(pl.col("connected") == True)
+            .select(["target_id", "sentiment_own", "fail_repetitive", "fail_inactivity",
+                     "fail_objection", "fail_misunderstanding"])
+            .head(10))

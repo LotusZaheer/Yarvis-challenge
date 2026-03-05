@@ -214,8 +214,16 @@ def _export(df: pl.DataFrame) -> None:
 def clean(df: pl.DataFrame) -> pl.DataFrame:
     """
     Limpia y normaliza el DataFrame crudo.
+    Si calls_clean.csv ya existe y tiene las columnas esperadas, lo carga directamente.
     No muta la entrada; retorna un nuevo DataFrame enriquecido.
     """
+    _expected = ["hour", "day_of_week", "duration_sec", "transcript_text", "inconsistency_flag"]
+    if CLEAN_CSV.exists():
+        df_cached = pl.read_csv(CLEAN_CSV, infer_schema_length=5000)
+        if all(c in df_cached.columns for c in _expected):
+            print(f"[INFO] Cache encontrado: {CLEAN_CSV.name} ({df_cached.height:,} filas)")
+            return df_cached
+
     df_original = df
     df = _parse_datetime(df)
     df = _normalize_duration(df)
