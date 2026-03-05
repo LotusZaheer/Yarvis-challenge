@@ -18,14 +18,30 @@
   - `transcript` JSON → texto plano `transcript_text` + `transcript_length`
   - `inconsistency_flag`: 16,700 registros con `connected != call_completed`
   - Salida: `data/processed/calls_clean.csv` (73,487 filas, 25 columnas)
-- [ ] Fase 3 – Análisis exploratorio de datos (EDA) con visualizaciones
-- [ ] Fase 4 – Análisis de patrones de contactabilidad
-- [ ] Fase 5 – Clustering de contactos conectados
-- [ ] Fase 6 – Análisis de sentimiento propio (independiente del post-llamada existente)
-- [ ] Fase 7 – Evaluación de desempeño del agente de IA
-- [ ] Fase 8 – Generación de reporte PDF con hallazgos y visualizaciones
-- [ ] Fase 9 – Exportación de CSVs con clústeres resultantes
-- [ ] Fase 10 – Generación de PDF de métodos técnicos empleados
+- [ ] **Fase 3 – EDA + Tarea 0 — Patrones de Contactabilidad:** `scripts/contactability.py`
+  - Tasa de conexión (`connected=True / total`) por `hour`, `day_of_week`, tipo de campaña (extraído de `name`) y cruce hora × día (heatmap)
+  - Determinar ventana óptima: top N horas × días con mayor tasa de conexión
+  - Exportar visualizaciones a `reports/figures/`
+  - Retorna `pl.DataFrame` con métricas de contactabilidad
+- [ ] **Fase 4 – Tarea 1 — Clustering de Contactos Conectados:** `scripts/cluster_contacts.py`
+  - Filtrar `connected = True`; features: `duration_sec`, `transcript_length`, `hour`, `pca_sentimiento` (one-hot), `pca_posible_recuperacion` (one-hot), `disconnected_reason` (one-hot top categorías)
+  - Normalizar con `StandardScaler`; KMeans `random_state=42`; k óptimo via elbow + silhouette (rango 2–8)
+  - Perfil descriptivo por cluster; exportar `data/processed/clusters_contacts.csv` con columna `cluster_id`
+- [ ] **Fase 5 – Tarea 2 — Análisis de Sentimiento Propio:** `scripts/sentiment_analysis.py`
+  - **Nota:** `pca_sentimiento` (ya extraído del JSON post-llamada) es la clasificación del sistema Yarvis — **NO** es el sentimiento propio a derivar.
+  - Input: `transcript_text`; modelo: `pysentimiento` (robertuito, preentrenado en español conversacional)
+  - Clasificar cada transcripción → `sentiment_own` (negativo / neutral / positivo)
+  - Comparar distribución `sentiment_own` vs. `pca_sentimiento`; analizar por campaña, `hour`, `duration_sec`
+  - Exportar `sentiment_own` integrado (CSV separado o columna adicional)
+- [ ] **Fase 6 – Tarea 3 — Desempeño del Agente Yarvis:** `scripts/agent_performance.py`
+  - Input: `transcript_text`, `pca_resumen`, `pca_razon_churn`, `duration_sec`, `sentiment_own`, `disconnected_reason`
+  - Detectar patrones de falla: respuestas repetitivas (regex), silencios/inactividad, no manejo de objeciones, malentendidos (llamadas cortas + user_hangup + sentimiento negativo)
+  - Cuantificar frecuencia por tipo de falla; cruzar con campaña y hora; generar recomendaciones
+  - Output: métricas + ejemplos (va al reporte, sin CSV separado)
+- [ ] **Fase 7 – Generación de Entregables**
+  - `reports/report.pdf`: hallazgos tareas 0–3, visualizaciones, razonamiento (weasyprint o reportlab)
+  - `reports/methods.pdf`: métodos técnicos empleados
+  - `data/processed/clusters_contacts.csv`: generado en Fase 4
 
 ## Integración
 - [ ] Validar flujo completo de extremo a extremo con muestra del dataset
