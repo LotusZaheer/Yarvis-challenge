@@ -6,6 +6,7 @@
 - [x] Confirmar librerías disponibles (polars, scikit-learn, scipy, matplotlib, rich)
 - [x] Definir entorno virtual y archivo de dependencias (`requeriments.txt` con versiones `>=`)
 - [x] Crear estructura de directorios del proyecto
+- [x] Refactorización: Separación de funciones de visualización en `utils/display.py` (reutilizables entre `main.py` y `main.ipynb`)
 
 ## Fases
 - [x] **Fase 1 – Carga y validación:** `scripts/load_data.py` funcional

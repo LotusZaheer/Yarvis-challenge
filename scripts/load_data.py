@@ -58,21 +58,8 @@ def load_raw(path: Path = RAW_CSV) -> pl.DataFrame:
     )
 
 
-    # --- Reporte rápido ---
-    print(f"[INFO] Registros cargados : {df.height:,}")
-    print(f"[INFO] Columnas           : {df.columns}")
-    
-    print("\n[INFO] Tipos de dato:")
-    for col_name, dtype in zip(df.columns, df.dtypes):
-        print(f"{col_name}: {dtype}")
-        
-    print("\n[INFO] Valores nulos por columna:")
-    nulls = df.null_count()
-    for col in df.columns:
-        print(f"{col}: {nulls[col][0]}")
-        
-    conectadas = df.filter(pl.col("connected") == True).height
-    print(f"\n[INFO] Conectadas (True)  : {conectadas:,}")
+    # --- Reporte mínimo: solo conteo ---
+    print(f"[INFO] Registros cargados: {df.height:,}")
 
     return df
 

@@ -4,9 +4,14 @@ Entrada : pl.DataFrame validado (salida de load_data.py)
 Salida  : pl.DataFrame limpio + data/processed/calls_clean.csv
 """
 
+import sys
 from pathlib import Path
 
 import polars as pl
+
+# Forzar UTF-8 en stdout para evitar errores en Windows con cp1252
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # ---------------------------------------------------------------------------
 # Rutas
@@ -35,19 +40,34 @@ PCA_FIELDS = [
 
 def _parse_datetime(df: pl.DataFrame) -> pl.DataFrame:
     """Convierte executed_at a Datetime y extrae features temporales."""
+
+    dias_semana = {
+        0: "lu",
+        1: "ma",
+        2: "mi",
+        3: "ju",
+        4: "vi",
+        5: "sa",
+        6: "do",
+    }
+
     df = df.with_columns(
         pl.col("executed_at")
         .str.to_datetime("%Y-%m-%d %H:%M:%S%.f", strict=False)
         .alias("executed_at")
     )
+
     df = df.with_columns(
         pl.col("executed_at").dt.hour().alias("hour"),
-        # weekday: lunes=1, domingo=7 (ISO), se deja como entero para EDA
-        pl.col("executed_at").dt.weekday().alias("day_of_week"),
-        pl.col("executed_at").dt.date().alias("date"),
+        pl.col("executed_at").dt.day().alias("day_of_month"),
+        pl.col("executed_at").dt.strftime("%d/%m/%Y").alias("date"),
+        pl.col("executed_at")
+        .dt.weekday()
+        .replace_strict(dias_semana)
+        .alias("day_of_week"),
     )
-    return df
 
+    return df
 
 def _normalize_duration(df: pl.DataFrame) -> pl.DataFrame:
     """Castea duration_ms a Float64, agrega duration_sec y flag de outlier."""
@@ -146,7 +166,7 @@ def _validate(df_original: pl.DataFrame, df_clean: pl.DataFrame) -> None:
 
     # 2. Columnas nuevas esperadas
     expected_new = [
-        "hour", "day_of_week", "date",
+        "hour", "day_of_week", "day_of_month", "date",
         "duration_sec", "duration_outlier",
         "transcript_text", "transcript_length",
         "inconsistency_flag",
@@ -165,7 +185,7 @@ def _validate(df_original: pl.DataFrame, df_clean: pl.DataFrame) -> None:
     incons = df_clean["inconsistency_flag"].sum()
     outliers = df_clean["duration_outlier"].sum()
     print(f"[INFO] Registros inconsistentes (connected != call_completed): {incons:,}")
-    print(f"[INFO] Outliers de duración (>p99): {outliers:,}")
+    print(f"[INFO] Outliers de duracion (>p99): {outliers:,}")
 
     # 5. Valores válidos en pca_sentimiento
     if "pca_sentimiento" in df_clean.columns:
@@ -176,7 +196,7 @@ def _validate(df_original: pl.DataFrame, df_clean: pl.DataFrame) -> None:
             print(f"[WARN] Valores inesperados en pca_sentimiento: {unexpected}")
         else:
             sentimiento_dist = df_clean["pca_sentimiento"].value_counts(sort=True)
-            print(f"[INFO] Distribución pca_sentimiento:\n{sentimiento_dist}")
+            print(f"[INFO] Distribucion pca_sentimiento:\n{sentimiento_dist}")
 
 
 def _export(df: pl.DataFrame) -> None:
