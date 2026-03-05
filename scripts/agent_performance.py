@@ -167,15 +167,19 @@ def analyze_agent_performance(df: pl.DataFrame) -> pl.DataFrame:
     _fail_cols = ["fail_repetitive", "fail_inactivity", "fail_objection", "fail_misunderstanding"]
     _figure = FIGURES_DIR / "agent_failures.png"
 
+    _MIN_SIZE_KB = 2
     if AGENT_CACHE.exists():
         cached = pl.read_csv(AGENT_CACHE)
-        df = df.join(cached.select(["call_url"] + _fail_cols), on="call_url", how="left")
-        for col in _fail_cols:
-            df = df.with_columns(pl.col(col).fill_null(False))
-        if not _figure.exists():
-            _plot_failures(df, _figure)
-        print(f"[INFO] Cache encontrado: {AGENT_CACHE.name}")
-        return df
+        # Validar que el CSV tiene las filas esperadas
+        if cached.height == df.height:
+            df = df.join(cached.select(["call_url"] + _fail_cols), on="call_url", how="left")
+            for col in _fail_cols:
+                df = df.with_columns(pl.col(col).fill_null(False))
+            if not _figure.exists() or _figure.stat().st_size < _MIN_SIZE_KB * 1024:
+                _plot_failures(df, _figure)
+            print(f"[INFO] Cache encontrado: {AGENT_CACHE.name} ({cached.height:,} filas)")
+            return df
+        print(f"[WARN] Cache invalido (filas: {cached.height:,} vs esperadas: {df.height:,}), recalculando...")
 
     df = _detect_failures(df)
     _print_summary(df)
