@@ -19,6 +19,7 @@ from rich.panel import Panel
 from rich import box
 
 from load_data import load_raw
+from clean_data import clean
 
 
 console = Console(force_terminal=True, safe_box=True)
@@ -109,6 +110,33 @@ def mostrar_muestra(df, n=5):
     console.print(tabla)
 
 
+def mostrar_columnas_nuevas(df):
+    """Muestra solo las columnas agregadas en la Fase 2."""
+    nuevas = [
+        "hour", "day_of_week", "date",
+        "duration_sec", "duration_outlier",
+        "transcript_length", "inconsistency_flag",
+        "pca_sentimiento", "pca_razon_churn", "pca_posible_recuperacion",
+    ]
+    cols_presentes = [c for c in nuevas if c in df.columns]
+    if not cols_presentes:
+        return
+
+    tabla = Table(
+        title="Columnas Nuevas - Fase 2 (primeras 5 filas)",
+        box=box.ROUNDED,
+        header_style="bold cyan",
+        show_lines=True,
+    )
+    for col in cols_presentes:
+        tabla.add_column(col, max_width=25, overflow="ellipsis")
+
+    for row in df.select(cols_presentes).head(5).iter_rows():
+        tabla.add_row(*[str(v) if v is not None else "—" for v in row])
+
+    console.print(tabla)
+
+
 def main():
     console.print()
     console.rule("[bold yellow]Pipeline de Analisis de Llamadas[/]")
@@ -118,22 +146,27 @@ def main():
     console.print("[bold]>> Paso 1:[/] Cargando datos desde CSV...\n")
     df = load_raw()
 
+    # Paso 2: Limpiar y normalizar
+    console.print("\n[bold]>> Paso 2:[/] Limpiando y normalizando datos...\n")
+    df_clean = clean(df)
+
     console.print()
-    console.rule("[bold yellow]Visualizacion de Datos[/]")
+    console.rule("[bold yellow]Visualizacion de Datos Limpios[/]")
     console.print()
 
-    # Paso 2: Mostrar resumen
-    mostrar_resumen(df)
+    mostrar_resumen(df_clean)
     console.print()
 
-    # Paso 3: Mostrar muestra
-    mostrar_muestra(df)
+    mostrar_columnas_nuevas(df_clean)
     console.print()
 
-    console.rule("[bold green]Carga completada exitosamente[/]")
+    mostrar_muestra(df_clean)
     console.print()
 
-    return df
+    console.rule("[bold green]Fase 2 completada exitosamente[/]")
+    console.print()
+
+    return df_clean
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ project/
 ├── data/
 │   ├── raw/           # CSV original, inmutable
 │   └── processed/     # CSVs limpios y clústeres de salida
-├── notebooks/         # Exploración y análisis interactivo
+├── sanity_checks/     # Exploración y análisis interactivo (scripts numerados)
 ├── scripts/           # Módulos del pipeline
 ├── reports/           # PDFs generados
 ├── models/            # Modelos serializados (si aplica)
@@ -55,7 +55,7 @@ project/
 - `.claude/skills/hardware/local_env.md`
 
 ## Consideraciones
-- Always reply in spanish (code in english, comments in spanish) even if input is in english.
+- Always reply in spanish (code, functions, variables in english, only the comments in spanish) even if input is in english.
 - Not use large (simplify) explanatory unless requested.
 - Cada que se agregue una nueva libreria al env de python agregala a requirements.txt
 - Mantener únicamente dependencias directas en `requirements.txt` con versión mínima `>=` (evitar `pip freeze` completo).
