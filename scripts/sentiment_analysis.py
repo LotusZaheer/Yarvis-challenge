@@ -128,18 +128,17 @@ def analyze_sentiment(df: pl.DataFrame) -> pl.DataFrame:
         print(f"[INFO] Cache encontrado: {SENTIMENT_CACHE.name}")
         return df
 
-    transcripts = df["transcript_text"].to_list()
-
-    sentiments = []
-    for txt in transcripts:
+    def _classify_text(txt: str | None) -> str:
         if txt is None:
-            sentiments.append("neutral")
-            continue
+            return "neutral"
         user_text = _extract_user_text(txt)
-        score = _score_text(user_text)
-        sentiments.append(_classify(score, user_text))
+        return _classify(_score_text(user_text), user_text)
 
-    df = df.with_columns(pl.Series("sentiment_own", sentiments, dtype=pl.Utf8))
+    df = df.with_columns(
+        pl.col("transcript_text")
+        .map_elements(_classify_text, return_dtype=pl.Utf8)
+        .alias("sentiment_own")
+    )
 
     # Guardar checkpoint (call_url + sentiment_own)
     df.select(["call_url", "sentiment_own"]).write_csv(SENTIMENT_CACHE)

@@ -19,20 +19,20 @@
   - `inconsistency_flag`: 16,700 registros con `connected != call_completed`
   - Extraer `campaign_type` del campo `name` (churn, upsell, retención, etc.) como feature reutilizable
   - Salida: `data/processed/calls_clean.csv` (73,487 filas, ~26 columnas)
-- [ ] **Fase 3 – EDA + Tarea 0 — Patrones de Contactabilidad:** `scripts/contactability.py`
+- [~] **Fase 3 – EDA + Tarea 0 — Patrones de Contactabilidad:** `scripts/contactability.py` *(implementado, pendiente de probar)*
   - Tasa de conexión (`connected=True / total`) por `hour`, `day_of_week`, `campaign_type` y cruce hora × día (heatmap)
   - Determinar ventana óptima: top N horas × días con mayor tasa de conexión
   - **Visualizaciones:** heatmap hora × día, barras por `campaign_type`, línea de tasa por hora
   - Exportar visualizaciones a `reports/figures/contactability_*.png`
   - Retorna `pl.DataFrame` con métricas de contactabilidad
-- [ ] **Fase 4 – Tarea 1 — Clustering de Contactos Conectados:** `scripts/cluster_contacts.py`
+- [~] **Fase 4 – Tarea 1 — Clustering de Contactos Conectados:** `scripts/cluster_contacts.py` *(implementado, pendiente de probar)*
   - Filtrar `connected = True`; features: `duration_sec`, `transcript_length`, `hour`, `pca_sentimiento` (one-hot), `pca_posible_recuperacion` (one-hot), `disconnected_reason` (one-hot top categorías), `campaign_type` (one-hot)
   - Normalizar con `StandardScaler`; KMeans `random_state=42`; k óptimo via elbow + silhouette (rango 2–8)
   - Perfil descriptivo por cluster
   - **Visualizaciones:** elbow plot, silhouette plot, scatter PCA 2D coloreado por cluster, barras de distribución de features por cluster
   - Exportar visualizaciones a `reports/figures/clusters_*.png`
   - Exportar `data/processed/clusters_contacts.csv` con columna `cluster_id`
-- [ ] **Fase 5 – Tarea 2 — Análisis de Sentimiento Propio:** `scripts/sentiment_analysis.py`
+- [~] **Fase 5 – Tarea 2 — Análisis de Sentimiento Propio:** `scripts/sentiment_analysis.py` *(implementado, pendiente de probar)*
   - **Nota:** `pca_sentimiento` (ya extraído del JSON post-llamada) es la clasificación del sistema Yarvis — **NO** es el sentimiento propio a derivar.
   - Input: `transcript_text`
   - **Estrategia de clasificación (con fallback):**
@@ -46,7 +46,7 @@
   - **Visualizaciones:** barras de distribución sentimiento propio vs. Yarvis, heatmap sentimiento × campaign_type, boxplot duración por sentimiento
   - Exportar visualizaciones a `reports/figures/sentiment_*.png`
   - Exportar `sentiment_own` como columna adicional en CSV o archivo separado
-- [ ] **Fase 6 – Tarea 3 — Desempeño del Agente Yarvis:** `scripts/agent_performance.py`
+- [~] **Fase 6 – Tarea 3 — Desempeño del Agente Yarvis:** `scripts/agent_performance.py` *(implementado, pendiente de probar)*
   - Input: `transcript_text`, `pca_resumen`, `pca_razon_churn`, `duration_sec`, `sentiment_own`, `disconnected_reason`
   - Detectar patrones de falla:
     - Respuestas repetitivas (regex / n-gram repetition)

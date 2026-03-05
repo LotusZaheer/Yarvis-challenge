@@ -48,8 +48,11 @@ def _classify_campaign(name: str) -> str:
 
 
 def _add_campaign_type(df: pl.DataFrame) -> pl.DataFrame:
-    labels = [_classify_campaign(n or "") for n in df["name"].to_list()]
-    return df.with_columns(pl.Series("campaign_type", labels, dtype=pl.Utf8))
+    return df.with_columns(
+        pl.col("name")
+        .map_elements(lambda n: _classify_campaign(n or ""), return_dtype=pl.Utf8)
+        .alias("campaign_type")
+    )
 
 
 def _connection_rate(df: pl.DataFrame, group_col: str) -> pl.DataFrame:
@@ -143,12 +146,12 @@ def analyze_contactability(df: pl.DataFrame) -> pl.DataFrame:
 
     # --- Tasa por día de la semana ---
     by_dow = _connection_rate(df, "day_of_week")
-    dow_rank = {d: i for i, d in enumerate(DOW_ORDER)}
     by_dow_sorted = (
         by_dow
         .with_columns(
             pl.col("day_of_week")
-            .map_elements(lambda d: dow_rank.get(d, 99), return_dtype=pl.Int8)
+            .replace(DOW_ORDER, list(range(len(DOW_ORDER))), default=99)
+            .cast(pl.Int8)
             .alias("_rank")
         )
         .sort("_rank")
@@ -175,28 +178,45 @@ def analyze_contactability(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     # --- Heatmap hora × día ---
+    # Calcular tasas con group_by vectorizado (un solo pase sobre el df completo)
+    rates_df = (
+        df.with_columns(pl.col("connected").cast(pl.Int32))
+        .group_by(["day_of_week", "hour"])
+        .agg([
+            pl.len().alias("total"),
+            pl.col("connected").sum().alias("connected_count"),
+        ])
+        .with_columns((pl.col("connected_count") / pl.col("total")).alias("rate"))
+    )
+
     hours_all = sorted(df["hour"].unique().to_list())
     dows_in = [d for d in DOW_ORDER if d in df["day_of_week"].unique().to_list()]
+    hour_idx = {h: j for j, h in enumerate(hours_all)}
+    dow_idx = {d: i for i, d in enumerate(dows_in)}
+
+    # Poblar matrix iterando sobre el df ya agregado (≤168 filas, no 73k)
     matrix = np.zeros((len(dows_in), len(hours_all)))
-    for i, dow in enumerate(dows_in):
-        for j, h in enumerate(hours_all):
-            sub = df.filter((pl.col("day_of_week") == dow) & (pl.col("hour") == h))
-            if sub.height > 0:
-                matrix[i, j] = sub["connected"].cast(pl.Int32).sum() / sub.height
+    for row in rates_df.filter(pl.col("day_of_week").is_in(dows_in)).iter_rows(named=True):
+        i = dow_idx.get(row["day_of_week"])
+        j = hour_idx.get(row["hour"])
+        if i is not None and j is not None:
+            matrix[i, j] = row["rate"]
+
     _heatmap(
         matrix, dows_in, hours_all,
         "Tasa de Conexión: Hora × Día de la Semana",
         FIGURES_DIR / "contactability_heatmap.png",
     )
 
-    # Ventana óptima: top 5 combinaciones hora×día con >= 10 llamadas
-    rows = []
-    for i, dow in enumerate(dows_in):
-        for j, h in enumerate(hours_all):
-            sub = df.filter((pl.col("day_of_week") == dow) & (pl.col("hour") == h))
-            if sub.height >= 10:
-                rows.append({"day": dow, "hour": h, "total": sub.height, "rate": float(matrix[i, j])})
-    top_window = sorted(rows, key=lambda r: r["rate"], reverse=True)[:5]
+    # Ventana óptima: top 5 combos hora×día con >= 10 llamadas (vectorizado)
+    top_window = (
+        rates_df
+        .filter(pl.col("total") >= 10, pl.col("day_of_week").is_in(dows_in))
+        .rename({"day_of_week": "day"})
+        .sort("rate", descending=True)
+        .head(5)
+        .to_dicts()
+    )
 
     print(f"[INFO] Figuras de contactabilidad guardadas en: {FIGURES_DIR}")
     if top_window:

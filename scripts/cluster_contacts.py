@@ -198,15 +198,15 @@ def cluster_contacts(df: pl.DataFrame) -> pl.DataFrame:
     df_connected.select(out_cols).write_csv(out_path)
     print(f"[INFO] Exportado: clusters_contacts.csv ({df_connected.height:,} filas, k={best_k})")
 
-    # Agregar cluster_id al df completo (-1 para no conectados)
-    df = df.with_columns(pl.lit(-1).cast(pl.Int32).alias("cluster_id"))
-    # Actualizar los conectados (join por índice)
-    cluster_map = dict(zip(
-        df_connected["target_id"].to_list(),
-        df_connected["cluster_id"].to_list(),
-    ))
-    cluster_series = [cluster_map.get(t, -1) for t in df["target_id"].to_list()]
-    df = df.with_columns(pl.Series("cluster_id", cluster_series, dtype=pl.Int32))
+    # Agregar cluster_id al df completo (-1 para no conectados, join vectorizado por call_url)
+    df = (
+        df.join(
+            df_connected.select(["call_url", "cluster_id"]),
+            on="call_url",
+            how="left",
+        )
+        .with_columns(pl.col("cluster_id").fill_null(-1).cast(pl.Int32))
+    )
 
     return df
 

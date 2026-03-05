@@ -57,65 +57,53 @@ def _has_repetitive_responses(transcript: str, min_repeat: int = 2) -> bool:
 
 def _detect_failures(df: pl.DataFrame) -> pl.DataFrame:
     """
-    Añade 4 columnas booleanas de fallo al DataFrame.
+    Añade 4 columnas booleanas de fallo usando operaciones vectorizadas.
     Solo aplica sobre llamadas conectadas; el resto recibe False.
     """
-    transcripts = df["transcript_text"].to_list()
-    durations = df["duration_sec"].to_list()
-    disconn = df["disconnected_reason"].to_list()
-    sentiments = df.get_column("sentiment_own").to_list() if "sentiment_own" in df.columns else [None] * df.height
-    razon_churn = df["pca_razon_churn"].to_list() if "pca_razon_churn" in df.columns else [None] * df.height
-    posible_rec = df["pca_posible_recuperacion"].to_list() if "pca_posible_recuperacion" in df.columns else [None] * df.height
-    connected = df["connected"].to_list()
+    connected = pl.col("connected") == True
+    sent = pl.col("sentiment_own") if "sentiment_own" in df.columns else pl.lit("neutral")
 
-    fail_repetitive = []
-    fail_inactivity = []
-    fail_objection = []
-    fail_misunderstanding = []
-
-    for i in range(df.height):
-        if not connected[i]:
-            fail_repetitive.append(False)
-            fail_inactivity.append(False)
-            fail_objection.append(False)
-            fail_misunderstanding.append(False)
-            continue
-
-        txt = transcripts[i] or ""
-        dur = durations[i] or 0.0
-        disc = disconn[i] or ""
-        sent = sentiments[i] or "neutral"
-        churn = razon_churn[i]
-        rec = posible_rec[i]
-
-        # 1. Respuestas repetitivas del agente
-        fail_repetitive.append(_has_repetitive_responses(txt))
-
-        # 2. Inactividad (desconexión por timeout)
-        fail_inactivity.append(disc == "inactivity")
-
-        # 3. No manejo de objeciones:
-        #    hay razón de churn + sentimiento negativo + sin posible recuperación
-        fail_objection.append(
-            churn is not None
-            and sent == "negativo"
-            and (rec is None or str(rec).lower() in {"no", "no"})
+    return df.with_columns([
+        # 1. Respuestas repetitivas: map_elements solo sobre texto (necesita lógica Python por llamada)
+        pl.when(connected)
+        .then(
+            pl.col("transcript_text")
+            .map_elements(
+                lambda t: _has_repetitive_responses(t or ""), return_dtype=pl.Boolean
+            )
         )
+        .otherwise(False)
+        .alias("fail_repetitive"),
 
-        # 4. Malentendido: llamada muy corta + usuario cuelga + sentimiento negativo
-        fail_misunderstanding.append(
-            dur < SHORT_CALL_THRESHOLD_SEC
-            and disc == "user_hangup"
-            and sent == "negativo"
+        # 2. Inactividad: condición escalar vectorizable
+        pl.when(connected)
+        .then(pl.col("disconnected_reason") == "inactivity")
+        .otherwise(False)
+        .alias("fail_inactivity"),
+
+        # 3. No manejo de objeciones: multi-columna con when/then
+        pl.when(connected)
+        .then(
+            pl.col("pca_razon_churn").is_not_null()
+            & (sent == "negativo")
+            & (
+                pl.col("pca_posible_recuperacion").is_null()
+                | pl.col("pca_posible_recuperacion").str.to_lowercase().is_in(["no"])
+            )
         )
+        .otherwise(False)
+        .alias("fail_objection"),
 
-    df = df.with_columns([
-        pl.Series("fail_repetitive", fail_repetitive, dtype=pl.Boolean),
-        pl.Series("fail_inactivity", fail_inactivity, dtype=pl.Boolean),
-        pl.Series("fail_objection", fail_objection, dtype=pl.Boolean),
-        pl.Series("fail_misunderstanding", fail_misunderstanding, dtype=pl.Boolean),
+        # 4. Malentendido: llamada corta + usuario cuelga + sentimiento negativo
+        pl.when(connected)
+        .then(
+            (pl.col("duration_sec").fill_null(0.0) < SHORT_CALL_THRESHOLD_SEC)
+            & (pl.col("disconnected_reason") == "user_hangup")
+            & (sent == "negativo")
+        )
+        .otherwise(False)
+        .alias("fail_misunderstanding"),
     ])
-    return df
 
 
 def _print_summary(df: pl.DataFrame) -> None:
