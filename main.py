@@ -50,11 +50,25 @@ def mostrar_resumen(df):
     tabla_tipos.add_column("Tipo", style="yellow", justify="center")
     tabla_tipos.add_column("Nulos", style="red", justify="right")
     tabla_tipos.add_column("% Nulos", style="red", justify="right")
+    tabla_tipos.add_column("Válidos", style="green", justify="right")
+    tabla_tipos.add_column("% Válidos", style="green", justify="right")
+    tabla_tipos.add_column("Valores Distintos", style="cyan", justify="right")
 
     for col in df.columns:
         nulos = df[col].null_count()
-        pct = f"{nulos / df.height * 100:.1f}%"
-        tabla_tipos.add_row(col, str(df[col].dtype), f"{nulos:,}", pct)
+        validos = df.height - nulos
+        pct_nulos = (nulos / df.height) * 100
+        pct_validos = 100 - pct_nulos
+        distintos = df[col].n_unique()
+        tabla_tipos.add_row(
+            col,
+            str(df[col].dtype),
+            f"{nulos:,}",
+            f"{pct_nulos:.1f}%",
+            f"{validos:,}",
+            f"{pct_validos:.1f}%",
+            f"{distintos:,}"
+        )
 
     console.print(tabla_tipos)
 

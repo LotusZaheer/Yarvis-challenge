@@ -4,13 +4,16 @@
 CSV único → carga y validación → limpieza y normalización → EDA → clustering de contactos conectados + análisis de sentimiento propio → evaluación de desempeño del agente de IA → generación de entregables (PDF de reporte, CSVs de clústeres, PDF de métodos técnicos, código).
 
 ## Reglas esenciales
+- Cada vez que reciba el prompt "commit", revisa los Staged Changes, determina cómo los cambios afectan `PROJECT_REVIEW.md` y actualízalo solo si es necesario, siempre ignorando `sanity_checks/` y `logs/`, y sugiere un nombre de commit en inglés como texto plano.
 - Cada etapa del pipeline recibe un `pl.DataFrame` y retorna un `pl.DataFrame` transformado.
 - El CSV de entrada es la única fuente de datos; sin acceso a APIs ni bases de datos externas.
 - Archivos de salida: `CSV` para clústeres, `PDF` para reportes, `.ipynb` o `.py` para código fuente.
 - Nombres de archivos en `snake_case`; columnas normalizadas en `snake_case` durante limpieza.
 - Modelos de clustering y sentimiento con `random_state` fijo para reproducibilidad.
-- Separación estricta: `notebooks/` para exploración, `scripts/` para pipeline ejecutable.
-- No modificar el CSV original en `data/raw/`; toda salida va a `data/processed/`.
+- Separación estricta: `sanity_checks/` para validaciones y análisis exploratorio; `scripts/` exclusivamente para pipeline ejecutable y reproducible
+- No modificar el CSV original en `data/raw/` es inmutable
+- `sanity_checks/` escribe únicamente en `data/interim/`
+- `scripts/` solo genera outputs finales en `data/processed/`
 
 
 ## Estructura

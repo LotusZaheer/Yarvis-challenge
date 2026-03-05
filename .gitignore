@@ -2,3 +2,4 @@ env/
 .claude/
 *.csv
 __pycache__
+notas.md
