@@ -139,16 +139,21 @@ def cluster_contacts(df: pl.DataFrame) -> pl.DataFrame:
 
     _clusters_csv = PROCESSED_DIR / "clusters_contacts.csv"
     _figures = [FIGURES_DIR / "cluster_elbow_silhouette.png", FIGURES_DIR / "cluster_profiles.png"]
+    _MIN_SIZE_KB = 5
+
     if _clusters_csv.exists():
         cached = pl.read_csv(_clusters_csv).select(["call_url", "cluster_id"])
-        df = df.join(cached, on="call_url", how="left")
-        df = df.with_columns(pl.col("cluster_id").fill_null(-1).cast(pl.Int32))
-        if not all(f.exists() for f in _figures):
-            # Regenerar figuras si faltan, usando los datos del cache
-            df_connected = df.filter(pl.col("connected") == True)
-            _plot_cluster_profiles(df_connected, FIGURES_DIR / "cluster_profiles.png")
-        print(f"[INFO] Cache encontrado: {_clusters_csv.name}")
-        return df
+        # Validar que el CSV tiene las filas esperadas
+        if cached.height == df.height:
+            df = df.join(cached, on="call_url", how="left")
+            df = df.with_columns(pl.col("cluster_id").fill_null(-1).cast(pl.Int32))
+            if not all(f.exists() and f.stat().st_size > _MIN_SIZE_KB * 1024 for f in _figures):
+                # Regenerar figuras si faltan, usando los datos del cache
+                df_connected = df.filter(pl.col("connected") == True)
+                _plot_cluster_profiles(df_connected, FIGURES_DIR / "cluster_profiles.png")
+            print(f"[INFO] Cache encontrado: {_clusters_csv.name} ({cached.height:,} filas)")
+            return df
+        print(f"[WARN] Cache invalido (filas: {cached.height:,} vs esperadas: {df.height:,}), recalculando...")
 
     df_connected = df.filter(pl.col("connected") == True)
     print(f"[INFO] Clustering sobre {df_connected.height:,} llamadas conectadas")
