@@ -11,27 +11,31 @@
 ## Fases
 - [x] **Fase 1 – Carga y validación:** `scripts/load_data.py` funcional
   - Columnas renombradas a snake_case (`campaign_id`, `target_id`, `call_url`, `connected`, `disconnected_reason`, `duration_ms`, `transcript`, `post_call_analysis`, `executed_at`)
-- [x] **Fase 2 – Limpieza y normalización:** `scripts/clean_data.py` funcional
-  - `executed_at` → Datetime + features temporales (`hour`, `day_of_week`, `date`)
+- [x] **Fase 2 – Limpieza y normalización:** `scripts/clean_data.py` funcional (corregido)
+  - `executed_at` → Datetime + features temporales (`hour`, `day_of_week` ISO 1–7, `date`)
   - `duration_ms` → Float64 + `duration_sec` + `duration_outlier` (flag p99)
   - `post_call_analysis` JSON desempaquetado en 6 columnas `pca_*` (`pca_sentimiento`, `pca_razon_churn`, etc.)
   - `transcript` JSON → texto plano `transcript_text` + `transcript_length`
   - `inconsistency_flag`: 16,700 registros con `connected != call_completed`
   - Extraer `campaign_type` del campo `name` (churn, upsell, retención, etc.) como feature reutilizable
   - Salida: `data/processed/calls_clean.csv` (73,487 filas, ~26 columnas)
-- [~] **Fase 3 – EDA + Tarea 0 — Patrones de Contactabilidad:** `scripts/contactability.py` *(implementado, pendiente de probar)*
+  - **Fix:** Corrección de mapeo día_de_semana (ISO weekday 1–7, no Python weekday 0–6)
+- [x] **Fase 3 – EDA + Tarea 0 — Patrones de Contactabilidad:** `scripts/contactability.py` *(verificado y corregido)*
   - Tasa de conexión (`connected=True / total`) por `hour`, `day_of_week`, `campaign_type` y cruce hora × día (heatmap)
   - Determinar ventana óptima: top N horas × días con mayor tasa de conexión
-  - **Visualizaciones:** heatmap hora × día, barras por `campaign_type`, línea de tasa por hora
+  - **Visualizaciones:** heatmap hora × día (7 días × 24 horas, incluyendo días vacíos), barras por `campaign_type`, línea de tasa por hora
   - Exportar visualizaciones a `reports/figures/contactability_*.png`
   - Retorna `pl.DataFrame` con métricas de contactabilidad
-- [~] **Fase 4 – Tarea 1 — Clustering de Contactos Conectados:** `scripts/cluster_contacts.py` *(implementado, pendiente de probar)*
-  - Filtrar `connected = True`; features: `duration_sec`, `transcript_length`, `hour`, `pca_sentimiento` (one-hot), `pca_posible_recuperacion` (one-hot), `disconnected_reason` (one-hot top categorías), `campaign_type` (one-hot)
-  - Normalizar con `StandardScaler`; KMeans `random_state=42`; k óptimo via elbow + silhouette (rango 2–8)
-  - Perfil descriptivo por cluster
-  - **Visualizaciones:** elbow plot, silhouette plot, scatter PCA 2D coloreado por cluster, barras de distribución de features por cluster
+  - **Fix:** Asegurar que todos los 7 días aparecen en gráficos, incluso si no hay datos (rellenar con 0%)
+- [x] **Fase 4 – Tarea 1 — Clustering de Contactos Conectados:** `scripts/cluster_contacts.py` *(SOTA: K-Prototypes, verificado)*
+  - Filtrar `connected = True`; features: `duration_sec`, `transcript_length`, `hour`, `sentiment_own`, `disconnected_reason` (nativas, sin one-hot)
+  - **Algoritmo SOTA:** K-Prototypes en lugar de KMeans (maneja datos mixtos numéricas + categóricas nativamente)
+  - Inicialización Cao; métrica de validación: Calinski-Harabasz Index (robusto para datos mixtos)
+  - Perfil descriptivo por cluster (duración promedio, distribución de razones, sentimiento)
+  - **Visualizaciones:** perfil de clusters, scatter PCA 2D coloreado por cluster
   - Exportar visualizaciones a `reports/figures/clusters_*.png`
   - Exportar `data/processed/clusters_contacts.csv` con columna `cluster_id`
+  - **Insight:** Correlación duración ↔ transcript_length = 0.992 (casi perfecta); clustering dominado por duración de llamada
 - [~] **Fase 5 – Tarea 2 — Análisis de Sentimiento Propio:** `scripts/sentiment_analysis.py` *(implementado, pendiente de probar)*
   - **Nota:** `pca_sentimiento` (ya extraído del JSON post-llamada) es la clasificación del sistema Yarvis — **NO** es el sentimiento propio a derivar.
   - Input: `transcript_text`

@@ -42,13 +42,13 @@ def _parse_datetime(df: pl.DataFrame) -> pl.DataFrame:
     """Convierte executed_at a Datetime y extrae features temporales."""
 
     dias_semana = {
-        0: "lu",
-        1: "ma",
-        2: "mi",
-        3: "ju",
-        4: "vi",
-        5: "sa",
-        6: "do",
+        1: "lu",
+        2: "ma",
+        3: "mi",
+        4: "ju",
+        5: "vi",
+        6: "sa",
+        7: "do",
     }
 
     df = df.with_columns(

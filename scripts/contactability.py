@@ -148,22 +148,19 @@ def analyze_contactability(df: pl.DataFrame) -> pl.DataFrame:
         color="#2196F3",
     )
 
-    # --- Tasa por día de la semana ---
+    # --- Tasa por día de la semana (incluir todos los días, incluso vacíos) ---
     by_dow = _connection_rate(df, "day_of_week")
-    by_dow_sorted = (
-        by_dow
-        .with_columns(
-            pl.col("day_of_week")
-            .replace(DOW_ORDER, list(range(len(DOW_ORDER))), default=99)
-            .cast(pl.Int8)
-            .alias("_rank")
-        )
-        .sort("_rank")
-        .drop("_rank")
-    )
+    # Asegurar que todos los 7 días aparezcan, rellenando con 0% para los faltantes
+    by_dow_complete = pl.DataFrame({
+        "day_of_week": DOW_ORDER,
+        "total": [0] * len(DOW_ORDER),
+        "connected_count": [0] * len(DOW_ORDER),
+        "connection_rate": [0.0] * len(DOW_ORDER),
+    }).update(by_dow, on="day_of_week")
+
     _bar_chart(
-        by_dow_sorted["day_of_week"].to_list(),
-        by_dow_sorted["connection_rate"].to_list(),
+        by_dow_complete["day_of_week"].to_list(),
+        by_dow_complete["connection_rate"].to_list(),
         "Día de la semana", "Tasa de conexión",
         "Tasa de Conexión por Día de la Semana",
         FIGURES_DIR / "contactability_by_dow.png",
@@ -194,20 +191,20 @@ def analyze_contactability(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     hours_all = sorted(df["hour"].unique().to_list())
-    dows_in = [d for d in DOW_ORDER if d in df["day_of_week"].unique().to_list()]
+    dows_all = DOW_ORDER  # Incluir TODOS los 7 días, no solo los presentes
     hour_idx = {h: j for j, h in enumerate(hours_all)}
-    dow_idx = {d: i for i, d in enumerate(dows_in)}
+    dow_idx = {d: i for i, d in enumerate(dows_all)}
 
-    # Poblar matrix iterando sobre el df ya agregado (≤168 filas, no 73k)
-    matrix = np.zeros((len(dows_in), len(hours_all)))
-    for row in rates_df.filter(pl.col("day_of_week").is_in(dows_in)).iter_rows(named=True):
+    # Poblar matrix con todos los días (vacíos tendrán 0.0)
+    matrix = np.zeros((len(dows_all), len(hours_all)))
+    for row in rates_df.iter_rows(named=True):
         i = dow_idx.get(row["day_of_week"])
         j = hour_idx.get(row["hour"])
         if i is not None and j is not None:
             matrix[i, j] = row["rate"]
 
     _heatmap(
-        matrix, dows_in, hours_all,
+        matrix, dows_all, hours_all,
         "Tasa de Conexión: Hora × Día de la Semana",
         FIGURES_DIR / "contactability_heatmap.png",
     )

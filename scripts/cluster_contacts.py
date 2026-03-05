@@ -1,8 +1,7 @@
 """
-Script 05 - Clustering de contactos conectados (Tarea 1).
-Entrada : pl.DataFrame con sentiment_own (salida de sentiment_analysis.py)
-Salida  : pl.DataFrame con columna cluster_id + data/processed/clusters_contacts.csv
-          + figuras en reports/figures/
+Script 05 - Clustering de contactos conectados (SOTA: K-Prototypes).
+Entrada : pl.DataFrame con sentiment_own.
+Salida  : pl.DataFrame con columna cluster_id + exportación CSV y figuras.
 """
 
 import sys
@@ -13,13 +12,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
-from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
+from kmodes.kprototypes import KPrototypes
+from sklearn.metrics import calinski_harabasz_score
 from sklearn.preprocessing import StandardScaler
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeRemainingColumn
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+# Configuración de rutas
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLEAN_CSV = PROJECT_ROOT / "data" / "processed" / "calls_clean.csv"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
@@ -28,68 +29,63 @@ FIGURES_DIR = PROJECT_ROOT / "reports" / "figures"
 RANDOM_STATE = 42
 K_RANGE = range(2, 9)
 
+# --- FUNCIONES DE APOYO ---
 
-def _build_features(df: pl.DataFrame) -> tuple[np.ndarray, list[str]]:
-    """Construye matriz de features para clustering."""
-    feature_cols = []
+def _prepare_data_for_kproto(df: pl.DataFrame):
+    """
+    Prepara matriz mixta: numéricas escaladas + categóricas como strings.
+    Evita One-Hot encoding para mejorar interpretabilidad y velocidad.
+    """
+    # 1. Definir tipos de columnas
+    num_cols = ["duration_sec", "transcript_length", "hour"]
+    cat_cols = ["disconnected_reason"]
+    if "sentiment_own" in df.columns:
+        cat_cols.append("sentiment_own")
 
-    # Numéricas
-    df = df.with_columns([
+    # 2. Procesar numéricas: Imputación rápida y escalado
+    df_num = df.select([
         pl.col("duration_sec").fill_null(pl.col("duration_sec").mean()),
         pl.col("transcript_length").fill_null(0.0).cast(pl.Float64),
         pl.col("hour").cast(pl.Float64),
     ])
-    feature_cols += ["duration_sec", "transcript_length", "hour"]
+    
+    scaler = StandardScaler()
+    X_num = scaler.fit_transform(df_num.to_numpy())
 
-    # One-hot: razón de desconexión (categorías relevantes en llamadas conectadas)
-    for reason in ["user_hangup", "agent_hangup", "inactivity"]:
-        col = f"dr_{reason}"
-        df = df.with_columns(
-            (pl.col("disconnected_reason") == reason).cast(pl.Float64).alias(col)
-        )
-        feature_cols.append(col)
+    # 3. Procesar categóricas: Llenar nulos como categoría 'unknown'
+    df_cat = df.select([
+        pl.col(c).fill_null("unknown").cast(pl.String) for c in cat_cols
+    ])
+    X_cat = df_cat.to_numpy()
 
-    # One-hot: sentiment_own (si existe)
-    if "sentiment_own" in df.columns:
-        for sent in ["positivo", "negativo"]:
-            col = f"sent_{sent}"
-            df = df.with_columns(
-                (pl.col("sentiment_own") == sent).cast(pl.Float64).alias(col)
-            )
-            feature_cols.append(col)
+    # Combinamos matrices (Numéricas primero, Categóricas después)
+    X_final = np.hstack([X_num, X_cat])
+    
+    # Identificar índices de las columnas categóricas para K-Prototypes
+    cat_indices = list(range(X_num.shape[1], X_final.shape[1]))
+    
+    return X_final, cat_indices, X_num
 
-    X = df.select(feature_cols).to_numpy().astype(float)
-    # Imputar NaN residuales con 0
-    X = np.nan_to_num(X, nan=0.0)
-    return X, feature_cols
-
-
-def _plot_elbow_silhouette(inertias: dict, silhouettes: dict, out_path: Path):
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-    ks = sorted(inertias.keys())
-
-    ax1.plot(ks, [inertias[k] for k in ks], "o-", color="#2196F3")
-    ax1.set_xlabel("Número de clusters k")
-    ax1.set_ylabel("Inertia (WCSS)")
-    ax1.set_title("Método del Codo", fontweight="bold")
-    ax1.set_xticks(ks)
-
-    ax2.plot(ks, [silhouettes[k] for k in ks], "o-", color="#4CAF50")
-    best_k = max(silhouettes, key=silhouettes.get)
-    ax2.axvline(best_k, color="red", linestyle="--", alpha=0.7, label=f"k óptimo = {best_k}")
-    ax2.set_xlabel("Número de clusters k")
-    ax2.set_ylabel("Silhouette Score")
-    ax2.set_title("Silhouette Score por k", fontweight="bold")
-    ax2.set_xticks(ks)
-    ax2.legend()
-
+def _plot_evaluation_metrics(scores: dict, out_path: Path):
+    """Gráfico de métrica Calinski-Harabasz para selección de K."""
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ks = sorted(scores.keys())
+    vals = [scores[k] for k in ks]
+    
+    ax.plot(ks, vals, "o-", color="#673AB7", linewidth=2)
+    best_k = max(scores, key=scores.get)
+    ax.axvline(best_k, color="red", linestyle="--", label=f"K sugerido = {best_k}")
+    
+    ax.set_title("Calinski-Harabasz Index (Higher is better)", fontweight="bold")
+    ax.set_xlabel("Número de clusters k")
+    ax.set_ylabel("Score")
+    ax.legend()
     plt.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 
-
 def _plot_cluster_profiles(df_connected: pl.DataFrame, out_path: Path):
-    """Gráfico de perfil por cluster: duración media y longitud de transcript."""
+    """Perfilado de clusters mediante agregación de Polars."""
     profile = (
         df_connected.group_by("cluster_id")
         .agg([
@@ -106,117 +102,94 @@ def _plot_cluster_profiles(df_connected: pl.DataFrame, out_path: Path):
 
     x = np.arange(len(clusters))
     width = 0.35
-    fig, ax1 = plt.subplots(figsize=(9, 5))
+    fig, ax1 = plt.subplots(figsize=(10, 5))
     ax2 = ax1.twinx()
 
-    b1 = ax1.bar(x - width / 2, dur, width, label="Duración media (s)", color="#2196F3", alpha=0.8)
-    b2 = ax2.bar(x + width / 2, trans, width, label="Largo transcript (chars)", color="#FF9800", alpha=0.8)
+    ax1.bar(x - width/2, dur, width, label="Duración (s)", color="#2196F3")
+    ax2.bar(x + width/2, trans, width, label="Transcript (chars)", color="#FF9800")
 
-    ax1.set_xlabel("Cluster ID")
-    ax1.set_ylabel("Duración media (segundos)", color="#2196F3")
-    ax2.set_ylabel("Longitud transcript media (chars)", color="#FF9800")
-    ax1.set_title("Perfil de Clusters: Duración y Transcript", fontweight="bold")
     ax1.set_xticks(x)
-    ax1.set_xticklabels([f"Cluster {c}" for c in clusters])
-
-    lines = [b1, b2]
-    labels = [b.get_label() for b in lines]
-    ax1.legend(lines, labels, loc="upper right")
+    ax1.set_xticklabels([f"Cluster {c}\n(n={n})" for c, n in zip(clusters, profile["n"].to_list())])
+    ax1.set_title("Perfil de Clusters: Métricas de Negocio", fontweight="bold")
+    fig.legend(loc="upper right", bbox_to_anchor=(1, 1), bbox_transform=ax1.transAxes)
+    
     plt.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 
+# --- FUNCIÓN PRINCIPAL ---
 
 def cluster_contacts(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Aplica KMeans sobre registros conectados.
-    Si clusters_contacts.csv ya existe, carga cluster_id desde ahí (join por call_url).
-    Retorna df completo con columna cluster_id (-1 para no-conectados).
-    Exporta data/processed/clusters_contacts.csv con los registros conectados.
-    """
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-    _clusters_csv = PROCESSED_DIR / "clusters_contacts.csv"
-    _figures = [FIGURES_DIR / "cluster_elbow_silhouette.png", FIGURES_DIR / "cluster_profiles.png"]
-    _MIN_SIZE_KB = 5
-
-    if _clusters_csv.exists():
-        cached = pl.read_csv(_clusters_csv).select(["call_url", "cluster_id"])
-        # Validar que el CSV tiene las filas esperadas
-        if cached.height == df.height:
-            df = df.join(cached, on="call_url", how="left")
-            df = df.with_columns(pl.col("cluster_id").fill_null(-1).cast(pl.Int32))
-            if not all(f.exists() and f.stat().st_size > _MIN_SIZE_KB * 1024 for f in _figures):
-                # Regenerar figuras si faltan, usando los datos del cache
-                df_connected = df.filter(pl.col("connected") == True)
-                _plot_cluster_profiles(df_connected, FIGURES_DIR / "cluster_profiles.png")
-            print(f"[INFO] Cache encontrado: {_clusters_csv.name} ({cached.height:,} filas)")
-            return df
-        print(f"[WARN] Cache invalido (filas: {cached.height:,} vs esperadas: {df.height:,}), recalculando...")
-
     df_connected = df.filter(pl.col("connected") == True)
-    print(f"[INFO] Clustering sobre {df_connected.height:,} llamadas conectadas")
+    print(f"[INFO] Iniciando clustering SOTA sobre {df_connected.height:,} registros conectados")
 
-    X, feature_cols = _build_features(df_connected)
+    # 1. Preparación de datos
+    X, cat_indices, X_num_only = _prepare_data_for_kproto(df_connected)
+    
+    # 2. Búsqueda de K óptimo con Calinski-Harabasz (Métrica O(n))
+    scores = {}
+    best_k = 2
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeRemainingColumn(),
+        transient=True
+    ) as progress:
+        task = progress.add_task("[yellow]Optimizando K (K-Prototypes)...[/]", total=len(K_RANGE))
+        
+        for k in K_RANGE:
+            # Cao es un método de inicialización más rápido para datos categóricos
+            kp = KPrototypes(n_clusters=k, init='Cao', n_init=1, random_state=RANDOM_STATE, n_jobs=-1)
+            labels = kp.fit_predict(X, categorical=cat_indices)
+            
+            # El score se calcula sobre la parte numérica
+            score = calinski_harabasz_score(X_num_only, labels)
+            scores[k] = score
+            
+            progress.update(task, advance=1, description=f"[yellow]K={k} | Score={score:.2f}[/]")
 
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    best_k = max(scores, key=scores.get)
+    print(f"[INFO] K sugerido: {best_k} (Score: {scores[best_k]:.2f})")
+    _plot_evaluation_metrics(scores, FIGURES_DIR / "cluster_evaluation.png")
 
-    # Selección de k óptimo por silhouette
-    inertias = {}
-    silhouettes = {}
-    sample_size = min(5000, X_scaled.shape[0])
-    for k in K_RANGE:
-        km = KMeans(n_clusters=k, random_state=RANDOM_STATE, n_init=10)
-        labels = km.fit_predict(X_scaled)
-        inertias[k] = float(km.inertia_)
-        silhouettes[k] = float(
-            silhouette_score(X_scaled, labels, sample_size=sample_size, random_state=RANDOM_STATE)
-        )
+    # 3. Entrenamiento Final
+    print(f"[INFO] Entrenando modelo final con K-Prototypes (n_init=3)...")
+    kp_final = KPrototypes(n_clusters=best_k, init='Cao', n_init=3, random_state=RANDOM_STATE, n_jobs=-1)
+    final_labels = kp_final.fit_predict(X, categorical=cat_indices)
 
-    best_k = max(silhouettes, key=silhouettes.get)
-    print(f"[INFO] k optimo por silhouette: {best_k} (score={silhouettes[best_k]:.4f})")
-
-    _plot_elbow_silhouette(inertias, silhouettes, FIGURES_DIR / "cluster_elbow_silhouette.png")
-
-    # Modelo final
-    km_final = KMeans(n_clusters=best_k, random_state=RANDOM_STATE, n_init=10)
-    cluster_ids = km_final.fit_predict(X_scaled)
-
+    # 4. Integración y Exportación
     df_connected = df_connected.with_columns(
-        pl.Series("cluster_id", cluster_ids.tolist(), dtype=pl.Int32)
+        pl.Series("cluster_id", final_labels.astype(np.int32))
     )
 
     _plot_cluster_profiles(df_connected, FIGURES_DIR / "cluster_profiles.png")
 
-    # Exportar CSV de clústeres (call_url incluido como clave de cache)
-    export_cols = ["call_url", "campaign_id", "target_id", "cluster_id", "duration_sec",
-                   "transcript_length", "hour", "day_of_week", "disconnected_reason"]
-    if "sentiment_own" in df_connected.columns:
-        export_cols.append("sentiment_own")
-    if "campaign_type" in df_connected.columns:
-        export_cols.append("campaign_type")
-
-    out_cols = [c for c in export_cols if c in df_connected.columns]
+    # Exportar solo registros conectados
     out_path = PROCESSED_DIR / "clusters_contacts.csv"
-    df_connected.select(out_cols).write_csv(out_path)
-    print(f"[INFO] Exportado: clusters_contacts.csv ({df_connected.height:,} filas, k={best_k})")
+    df_connected.write_csv(out_path)
+    print(f"[INFO] ✓ Exportado: {out_path.name}")
 
-    # Agregar cluster_id al df completo (-1 para no conectados, join vectorizado por call_url)
-    df = (
-        df.join(
-            df_connected.select(["call_url", "cluster_id"]),
-            on="call_url",
-            how="left",
-        )
-        .with_columns(pl.col("cluster_id").fill_null(-1).cast(pl.Int32))
-    )
+    # Unir al dataframe original
+    df = df.join(
+        df_connected.select(["call_url", "cluster_id"]),
+        on="call_url",
+        how="left"
+    ).with_columns(pl.col("cluster_id").fill_null(-1).cast(pl.Int32))
 
+    print(f"[INFO] Proceso finalizado. {df_connected.height:,} llamadas asignadas a {best_k} clusters.")
     return df
 
-
 if __name__ == "__main__":
-    df = pl.read_csv(CLEAN_CSV)
-    df = cluster_contacts(df)
-    print(df.filter(pl.col("cluster_id") >= 0).select(["target_id", "cluster_id"]).head(5))
+    if CLEAN_CSV.exists():
+        df_input = pl.read_csv(CLEAN_CSV)
+        df_result = cluster_contacts(df_input)
+        print("\nPrimeras filas con clusters:")
+        print(df_result.filter(pl.col("cluster_id") >= 0).select(["target_id", "cluster_id"]).head(5))
+    else:
+        print(f"[ERROR] No se encontró el archivo {CLEAN_CSV}")
