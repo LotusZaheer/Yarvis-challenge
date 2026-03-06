@@ -14,9 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import matplotlib.pyplot as plt
 import polars as pl
 
+from utils.cache import load_csv_cache
 from utils.paths import CLEAN_CSV, FIGURES_DIR, PROCESSED_DIR
-from utils.text import normalize_text
 from utils.plotting import savefig
+from utils.text import extract_transcript_lines, normalize_text
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -26,19 +27,9 @@ AGENT_CACHE = PROCESSED_DIR / "cache_agent.csv"
 # Umbral de duración corta (segundos) para clasificar llamadas tipo "malentendido"
 SHORT_CALL_THRESHOLD_SEC = 30.0
 
-def _normalize_phrase(text: str) -> str:
-    return normalize_text(text)
-
-
 def _extract_agent_lines(transcript: str) -> list[str]:
     """Extrae utterances del agente del transcript."""
-    if not transcript:
-        return []
-    return [
-        line.strip()[6:].strip()
-        for line in transcript.split("\n")
-        if line.strip().startswith("Agent:")
-    ]
+    return extract_transcript_lines(transcript, "Agent")
 
 
 def _has_repetitive_responses(transcript: str, min_repeat: int = 2) -> bool:
@@ -46,7 +37,7 @@ def _has_repetitive_responses(transcript: str, min_repeat: int = 2) -> bool:
     lines = _extract_agent_lines(transcript)
     if len(lines) < min_repeat:
         return False
-    normalized = [_normalize_phrase(l) for l in lines if len(l) > 20]
+    normalized = [normalize_text(l) for l in lines if len(l) > 20]
     counts = Counter(normalized)
     return any(c >= min_repeat for c in counts.values())
 
@@ -169,23 +160,14 @@ def analyze_agent_performance(df: pl.DataFrame) -> pl.DataFrame:
     _fail_cols = ["fail_repetitive", "fail_inactivity", "fail_objection", "fail_misunderstanding", "fail_agent_hangup"]
     _figure = FIGURES_DIR / "agent_failures.png"
 
-    _MIN_SIZE_KB = 2
-    if AGENT_CACHE.exists():
-        cached = pl.read_csv(AGENT_CACHE)
-        # Validar filas y que todas las columnas esperadas existen
-        _cache_valid = (
-            cached.height == df.height
-            and all(c in cached.columns for c in _fail_cols)
-        )
-        if _cache_valid:
-            df = df.join(cached.select(["call_url"] + _fail_cols), on="call_url", how="left")
-            for col in _fail_cols:
-                df = df.with_columns(pl.col(col).fill_null(False))
-            if not _figure.exists() or _figure.stat().st_size < _MIN_SIZE_KB * 1024:
-                _plot_failures(df, _figure)
-            print(f"[INFO] Cache encontrado: {AGENT_CACHE.name} ({cached.height:,} filas)")
-            return df
-        print(f"[WARN] Cache invalido (filas o columnas desactualizadas), recalculando...")
+    cached = load_csv_cache(AGENT_CACHE, expected_rows=df.height, expected_cols=_fail_cols)
+    if cached is not None:
+        df = df.join(cached.select(["call_url"] + _fail_cols), on="call_url", how="left")
+        for col in _fail_cols:
+            df = df.with_columns(pl.col(col).fill_null(False))
+        if not _figure.exists() or _figure.stat().st_size < 2 * 1024:
+            _plot_failures(df, _figure)
+        return df
 
     df = _detect_failures(df)
     _print_summary(df)

@@ -15,7 +15,7 @@ import matplotlib.ticker as mticker
 import numpy as np
 import polars as pl
 
-from utils.paths import CLEAN_CSV, FIGURES_DIR
+from utils.paths import CLEAN_CSV, FIGURES_DIR, ensure_output_dirs
 from utils.plotting import savefig, DPI
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -483,7 +483,7 @@ def _figures_cached() -> bool:
 
 def analyze_contactability(df: pl.DataFrame) -> pl.DataFrame:
     """Analiza patrones de contactabilidad y genera visualizaciones."""
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_output_dirs()
     df = _add_campaign_type(df)
 
     if _figures_cached():

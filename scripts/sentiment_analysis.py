@@ -12,8 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import polars as pl
 
+from utils.cache import load_csv_cache
 from utils.paths import CLEAN_CSV, PROCESSED_DIR
-from utils.text import normalize_text
+from utils.text import extract_transcript_lines, normalize_text
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -65,20 +66,9 @@ _NEGATIVE_PHRASES = [
     "me voy a cambiar", "me tienen harto", "no me cobren mas",
 ]
 
-def _normalize(text: str) -> str:
-    return normalize_text(text)
-
-
 def _extract_user_text(transcript: str) -> str:
     """Extrae únicamente las líneas del usuario del transcript."""
-    if not transcript:
-        return ""
-    lines = []
-    for line in transcript.split("\n"):
-        stripped = line.strip()
-        if stripped.startswith("User:"):
-            lines.append(stripped[5:].strip())
-    return " ".join(lines)
+    return " ".join(extract_transcript_lines(transcript, "User"))
 
 
 def _score_text(text: str) -> float:
@@ -86,7 +76,7 @@ def _score_text(text: str) -> float:
     if not text or len(text.strip()) < 3:
         return 0.0
 
-    normalized = _normalize(text)
+    normalized = normalize_text(text)
 
     # Frases (mayor peso = 2)
     pos_score = sum(2 for p in _POSITIVE_PHRASES if p in normalized)
@@ -117,14 +107,11 @@ def analyze_sentiment(df: pl.DataFrame) -> pl.DataFrame:
     Si existe cache_sentiment.csv, lo carga y hace join por call_url.
     Retorna df con la nueva columna.
     """
-    if SENTIMENT_CACHE.exists():
-        cached = pl.read_csv(SENTIMENT_CACHE)
-        if cached.height == df.height:
-            df = df.join(cached.select(["call_url", "sentiment_own"]), on="call_url", how="left")
-            df = df.with_columns(pl.col("sentiment_own").fill_null("neutral"))
-            print(f"[INFO] Cache encontrado: {SENTIMENT_CACHE.name} ({cached.height:,} filas)")
-            return df
-        print(f"[WARN] Cache invalido (filas: {cached.height:,} vs esperadas: {df.height:,}), recalculando...")
+    cached = load_csv_cache(SENTIMENT_CACHE, expected_rows=df.height)
+    if cached is not None:
+        df = df.join(cached.select(["call_url", "sentiment_own"]), on="call_url", how="left")
+        df = df.with_columns(pl.col("sentiment_own").fill_null("neutral"))
+        return df
 
     def _classify_text(txt: str | None) -> str:
         if txt is None:

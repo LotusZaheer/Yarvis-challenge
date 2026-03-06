@@ -9,3 +9,9 @@ FIGURES_DIR   = PROJECT_ROOT / "reports" / "figures"
 
 RAW_CSV   = RAW_DIR / "data_calls.csv"
 CLEAN_CSV = PROCESSED_DIR / "calls_clean.csv"
+
+
+def ensure_output_dirs() -> None:
+    """Crea los directorios de salida del pipeline si no existen."""
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)

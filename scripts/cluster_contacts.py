@@ -35,7 +35,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
-from utils.paths import CLEAN_CSV, PROCESSED_DIR, FIGURES_DIR
+from utils.paths import CLEAN_CSV, PROCESSED_DIR, FIGURES_DIR, ensure_output_dirs
 from utils.plotting import savefig
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -401,7 +401,7 @@ def _export_clusters(df_c: pl.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 def cluster_contacts(df: pl.DataFrame) -> pl.DataFrame:
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_output_dirs()
     t_total = time.time()
 
     # Solo conectados — SIN filtrar nulls en features

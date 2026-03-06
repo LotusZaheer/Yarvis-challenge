@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import polars as pl
 
+from utils.cache import load_csv_cache
 from utils.paths import PROCESSED_DIR, CLEAN_CSV
 from utils.text import strip_accents
 
@@ -285,13 +286,16 @@ def clean(df: pl.DataFrame) -> pl.DataFrame:
     """
     _cache_check_cols = ["hour", "day_of_week", "duration_sec", "transcript_text", "inconsistency_flag"]
 
-    if CLEAN_CSV.exists():
-        df_cached = pl.read_csv(CLEAN_CSV, infer_schema_length=5000)
-        if (all(c in df_cached.columns for c in _cache_check_cols) and
-            df_cached.height > CACHE_MIN_ROWS):
-            print(f"[INFO] Cache encontrado: {CLEAN_CSV.name} ({df_cached.height:,} filas)")
-            return df_cached
-        print(f"[WARN] Cache invalido (filas: {df_cached.height:,}), recalculando...")
+    cached = load_csv_cache(
+        CLEAN_CSV,
+        expected_cols=_cache_check_cols,
+        min_size_kb=0,
+        infer_schema_length=5000,
+    )
+    if cached is not None and cached.height > CACHE_MIN_ROWS:
+        return cached
+    if cached is not None:
+        print(f"[WARN] Cache inválido (filas: {cached.height:,}), recalculando...")
 
     df_original = df
     df = _parse_datetime(df)
