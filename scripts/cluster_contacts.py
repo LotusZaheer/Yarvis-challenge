@@ -68,10 +68,10 @@ SENTIMENT_MAP  = {"positivo": 2, "neutral": 1, "negativo": 0}  # null → 1
 SIN_MOTIVO = {None, "", "n/a", "otro", "sin_motivo"}
 
 # Salidas
-FIG_K_SEL    = "cluster_v3_k_selection.png"
-FIG_PROFILES = "cluster_v3_profiles.png"
-FIG_RAZON    = "cluster_v3_razon_dist.png"
-OUT_CSV      = "clusters_contacts_v3.csv"
+FIG_K_SEL    = "cluster_k_selection.png"
+FIG_PROFILES = "cluster_profiles.png"
+FIG_RAZON    = "cluster_razon_dist.png"
+OUT_CSV      = "clusters_contacts.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +257,7 @@ def _plot_k_selection(inertias: dict, sil_scores: dict, best_k: int, out: Path) 
     ax2.set_xlabel("Número de clusters k"); ax2.set_ylabel("Silhouette")
     ax2.legend(); ax2.grid(alpha=0.3)
 
-    plt.suptitle("Selección K óptimo (v3 — K-Means, todos los conectados)", fontsize=13, fontweight="bold")
+    plt.suptitle("Selección K óptimo (K-Means, todos los conectados)", fontsize=13, fontweight="bold")
     savefig(fig, out, report=True)
 
 
@@ -328,7 +328,7 @@ def _plot_profiles(df_c: pl.DataFrame, out: Path) -> None:
         ax.legend(fontsize=7, loc="upper right")
 
     axes[1, 3].set_visible(False)
-    plt.suptitle("Perfiles de Clusters — Variables de Negocio (v3)", fontsize=13, fontweight="bold")
+    plt.suptitle("Perfiles de Clusters — Variables de Negocio", fontsize=13, fontweight="bold")
     savefig(fig, out, report=True)
 
 
@@ -363,7 +363,7 @@ def _plot_razon_dist(df_c: pl.DataFrame, out: Path) -> None:
             v = matrix[gi, ci]
             ax.text(ci, gi, f"{v:.1f}%", ha="center", va="center",
                     fontsize=8, color="white" if v > 50 else "black")
-    ax.set_title("Distribución razón churn por cluster (%) — v3", fontweight="bold")
+    ax.set_title("Distribución razón churn por cluster (%)", fontweight="bold")
     savefig(fig, out, report=True)
 
 
@@ -454,7 +454,7 @@ def cluster_contacts(df: pl.DataFrame) -> pl.DataFrame:
         how="left",
     ).with_columns(pl.col("cluster_id").fill_null(-1).cast(pl.Int32))
 
-    print(f"\n[INFO] cluster_contacts_v3 completado en {time.time()-t_total:.1f}s total")
+    print(f"\n[INFO] cluster_contacts completado en {time.time()-t_total:.1f}s total")
     return df
 
 
