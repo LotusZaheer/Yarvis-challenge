@@ -53,7 +53,7 @@ def _has_repetitive_responses(transcript: str, min_repeat: int = 2) -> bool:
 
 def _detect_failures(df: pl.DataFrame) -> pl.DataFrame:
     """
-    Añade 4 columnas booleanas de fallo usando operaciones vectorizadas.
+    Añade 5 columnas booleanas de fallo usando operaciones vectorizadas.
     Solo aplica sobre llamadas conectadas; el resto recibe False.
     """
     connected = pl.col("connected") == True
@@ -99,6 +99,12 @@ def _detect_failures(df: pl.DataFrame) -> pl.DataFrame:
         )
         .otherwise(False)
         .alias("fail_misunderstanding"),
+
+        # 5. Agente cuelga activamente: señal directa de abandono o confusión del agente
+        pl.when(connected)
+        .then(pl.col("disconnected_reason") == "agent_hangup")
+        .otherwise(False)
+        .alias("fail_agent_hangup"),
     ])
 
 
@@ -111,10 +117,11 @@ def _print_summary(df: pl.DataFrame) -> None:
         return
 
     failures = {
-        "Respuestas repetitivas": connected["fail_repetitive"].sum(),
-        "Inactividad (timeout)":  connected["fail_inactivity"].sum(),
-        "Sin manejo de objecion": connected["fail_objection"].sum(),
+        "Respuestas repetitivas":    connected["fail_repetitive"].sum(),
+        "Inactividad (timeout)":     connected["fail_inactivity"].sum(),
+        "Sin manejo de objecion":    connected["fail_objection"].sum(),
         "Malentendido/llamada corta": connected["fail_misunderstanding"].sum(),
+        "Agente cuelga (hangup)":    connected["fail_agent_hangup"].sum(),
     }
     print(f"[INFO] Desempeno del agente ({n:,} llamadas conectadas):")
     for label, count in failures.items():
@@ -130,13 +137,14 @@ def _plot_failures(df: pl.DataFrame, out_path: Path):
         "Inactividad\n(timeout)",
         "Sin manejo\nobjeción",
         "Malentendido\nllamada corta",
+        "Agente\ncuelga",
     ]
-    cols = ["fail_repetitive", "fail_inactivity", "fail_objection", "fail_misunderstanding"]
+    cols = ["fail_repetitive", "fail_inactivity", "fail_objection", "fail_misunderstanding", "fail_agent_hangup"]
     counts = [connected[c].sum() for c in cols]
     pcts = [c / n for c in counts]
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    bars = ax.bar(labels, pcts, color=["#F44336", "#FF9800", "#9C27B0", "#2196F3"], edgecolor="white")
+    bars = ax.bar(labels, pcts, color=["#F44336", "#FF9800", "#9C27B0", "#2196F3", "#607D8B"], edgecolor="white")
     ax.set_ylabel("% de llamadas conectadas")
     ax.set_title("Patrones de Falla del Agente Yarvis", fontsize=13, fontweight="bold")
     ax.yaxis.set_major_formatter(plt.matplotlib.ticker.PercentFormatter(1.0))
@@ -158,14 +166,18 @@ def analyze_agent_performance(df: pl.DataFrame) -> pl.DataFrame:
     Retorna df con columnas fail_* añadidas.
     """
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-    _fail_cols = ["fail_repetitive", "fail_inactivity", "fail_objection", "fail_misunderstanding"]
+    _fail_cols = ["fail_repetitive", "fail_inactivity", "fail_objection", "fail_misunderstanding", "fail_agent_hangup"]
     _figure = FIGURES_DIR / "agent_failures.png"
 
     _MIN_SIZE_KB = 2
     if AGENT_CACHE.exists():
         cached = pl.read_csv(AGENT_CACHE)
-        # Validar que el CSV tiene las filas esperadas
-        if cached.height == df.height:
+        # Validar filas y que todas las columnas esperadas existen
+        _cache_valid = (
+            cached.height == df.height
+            and all(c in cached.columns for c in _fail_cols)
+        )
+        if _cache_valid:
             df = df.join(cached.select(["call_url"] + _fail_cols), on="call_url", how="left")
             for col in _fail_cols:
                 df = df.with_columns(pl.col(col).fill_null(False))
@@ -173,7 +185,7 @@ def analyze_agent_performance(df: pl.DataFrame) -> pl.DataFrame:
                 _plot_failures(df, _figure)
             print(f"[INFO] Cache encontrado: {AGENT_CACHE.name} ({cached.height:,} filas)")
             return df
-        print(f"[WARN] Cache invalido (filas: {cached.height:,} vs esperadas: {df.height:,}), recalculando...")
+        print(f"[WARN] Cache invalido (filas o columnas desactualizadas), recalculando...")
 
     df = _detect_failures(df)
     _print_summary(df)
