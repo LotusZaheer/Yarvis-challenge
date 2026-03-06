@@ -15,6 +15,7 @@ import matplotlib.ticker as mticker
 import numpy as np
 import polars as pl
 
+from utils.df_helpers import connected_calls
 from utils.paths import CLEAN_CSV, FIGURES_DIR, ensure_output_dirs
 from utils.plotting import savefig, DPI
 
@@ -127,7 +128,7 @@ def _heatmap(matrix, row_labels, col_labels, title, out_path,
 def _boxplot_duration(df: pl.DataFrame, group_col: str, out_path: Path,
                       title: str, rotation: int = 0):
     """Boxplot de duration_sec por group_col (solo conectadas)."""
-    connected = df.filter(pl.col("connected") == True)
+    connected = connected_calls(df)
     groups = _resolve_group_order(connected, group_col)
 
     data = [
@@ -157,7 +158,7 @@ def _stacked_bar(df: pl.DataFrame, group_col: str, cat_col: str,
                  cat_order: list[str], cat_colors: dict[str, str],
                  out_path: Path, title: str, rotation: int = 0):
     """Stacked bar 100% genérico por group_col (solo conectadas)."""
-    connected = df.filter(pl.col("connected") == True)
+    connected = connected_calls(df)
     counts = connected.group_by([group_col, cat_col]).agg(pl.len().alias("n"))
     totals = connected.group_by(group_col).agg(pl.len().alias("total"))
     groups = _resolve_group_order(connected, group_col)

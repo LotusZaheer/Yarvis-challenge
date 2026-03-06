@@ -66,9 +66,6 @@ _NEGATIVE_PHRASES = [
     "me voy a cambiar", "me tienen harto", "no me cobren mas",
 ]
 
-def _extract_user_text(transcript: str) -> str:
-    """Extrae únicamente las líneas del usuario del transcript."""
-    return " ".join(extract_transcript_lines(transcript, "User"))
 
 
 def _score_text(text: str) -> float:
@@ -116,7 +113,7 @@ def analyze_sentiment(df: pl.DataFrame) -> pl.DataFrame:
     def _classify_text(txt: str | None) -> str:
         if txt is None:
             return "neutral"
-        user_text = _extract_user_text(txt)
+        user_text = " ".join(extract_transcript_lines(txt, "User"))
         return _classify(_score_text(user_text), user_text)
 
     df = df.with_columns(

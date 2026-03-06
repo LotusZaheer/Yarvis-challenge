@@ -35,6 +35,7 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
+from utils.df_helpers import connected_calls
 from utils.paths import CLEAN_CSV, PROCESSED_DIR, FIGURES_DIR, ensure_output_dirs
 from utils.plotting import savefig
 
@@ -405,7 +406,7 @@ def cluster_contacts(df: pl.DataFrame) -> pl.DataFrame:
     t_total = time.time()
 
     # Solo conectados — SIN filtrar nulls en features
-    df_conn = df.filter(pl.col("connected") == True)
+    df_conn = connected_calls(df)
     print(f"[INFO] Registros conectados: {df_conn.height:,}  (todos se usan para clustering)")
 
     # Encoding + escalado sobre todos los conectados

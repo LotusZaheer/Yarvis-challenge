@@ -15,7 +15,8 @@ import matplotlib.pyplot as plt
 import polars as pl
 
 from utils.cache import load_csv_cache
-from utils.paths import CLEAN_CSV, FIGURES_DIR, PROCESSED_DIR
+from utils.df_helpers import connected_calls
+from utils.paths import FIGURES_DIR, PROCESSED_DIR, ensure_output_dirs
 from utils.plotting import savefig
 from utils.text import extract_transcript_lines, normalize_text
 
@@ -27,14 +28,9 @@ AGENT_CACHE = PROCESSED_DIR / "cache_agent.csv"
 # Umbral de duración corta (segundos) para clasificar llamadas tipo "malentendido"
 SHORT_CALL_THRESHOLD_SEC = 30.0
 
-def _extract_agent_lines(transcript: str) -> list[str]:
-    """Extrae utterances del agente del transcript."""
-    return extract_transcript_lines(transcript, "Agent")
-
-
 def _has_repetitive_responses(transcript: str, min_repeat: int = 2) -> bool:
     """Detecta si el agente repite la misma frase >= min_repeat veces."""
-    lines = _extract_agent_lines(transcript)
+    lines = extract_transcript_lines(transcript or "", "Agent")
     if len(lines) < min_repeat:
         return False
     normalized = [normalize_text(l) for l in lines if len(l) > 20]
@@ -101,7 +97,7 @@ def _detect_failures(df: pl.DataFrame) -> pl.DataFrame:
 
 def _print_summary(df: pl.DataFrame) -> None:
     """Imprime resumen de fallas detectadas."""
-    connected = df.filter(pl.col("connected") == True)
+    connected = connected_calls(df)
     n = connected.height
     if n == 0:
         print("[WARN] No hay llamadas conectadas para analizar desempeño.")
@@ -121,7 +117,7 @@ def _print_summary(df: pl.DataFrame) -> None:
 
 def _plot_failures(df: pl.DataFrame, out_path: Path):
     """Gráfico de barras con frecuencia de cada tipo de falla."""
-    connected = df.filter(pl.col("connected") == True)
+    connected = connected_calls(df)
     n = connected.height
     labels = [
         "Respuestas\nrepetitivas",
@@ -156,7 +152,7 @@ def analyze_agent_performance(df: pl.DataFrame) -> pl.DataFrame:
     Si cache_agent.csv ya existe, carga las columnas fail_* desde ahí (join por call_url).
     Retorna df con columnas fail_* añadidas.
     """
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_output_dirs()
     _fail_cols = ["fail_repetitive", "fail_inactivity", "fail_objection", "fail_misunderstanding", "fail_agent_hangup"]
     _figure = FIGURES_DIR / "agent_failures.png"
 
@@ -181,7 +177,8 @@ def analyze_agent_performance(df: pl.DataFrame) -> pl.DataFrame:
 
 
 if __name__ == "__main__":
-    from sentiment_analysis import analyze_sentiment  # noqa: E402
+    from utils.paths import CLEAN_CSV
+    from scripts.sentiment_analysis import analyze_sentiment  # noqa: E402
 
     df = pl.read_csv(CLEAN_CSV)
     df = analyze_sentiment(df)

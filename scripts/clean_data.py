@@ -107,9 +107,7 @@ def _normalize_pca_razon_churn(value: str) -> str:
     return alias_map.get(normalized, normalized)
 
 
-def _normalize_pca_posible_recuperacion(value: str) -> str:
-    """Normaliza pca_posible_recuperacion: lowercase, sin tildes."""
-    return _normalize_pca_value(value, space_char="_")
+
 
 
 def _normalize_categoricals(df: pl.DataFrame) -> pl.DataFrame:
@@ -129,6 +127,9 @@ def _normalize_categoricals(df: pl.DataFrame) -> pl.DataFrame:
     return df
 
 
+# _PCA_DTYPE incluye TODOS los campos del JSON para una deserialización fiel.
+# Solo los campos en PCA_FIELDS se extraen como columnas en el DataFrame.
+# Los campos extra (operador, recarga_servicio, uso_del_servicio) se descartan.
 _PCA_DTYPE = pl.Struct({
     "resumen": pl.Utf8,
     "operador": pl.Utf8,
@@ -178,7 +179,7 @@ def _normalize_pca_fields(df: pl.DataFrame) -> pl.DataFrame:
     """Normaliza columnas pca_* categóricas: tildes, espacios→guiones, lowercase."""
     cols_to_normalize = {
         "pca_razon_churn": _normalize_pca_razon_churn,
-        "pca_posible_recuperacion": _normalize_pca_posible_recuperacion,
+        "pca_posible_recuperacion": _normalize_pca_value,   # sin alias: misma lógica base
     }
     for col, normalize_fn in cols_to_normalize.items():
         if col in df.columns:
@@ -289,13 +290,11 @@ def clean(df: pl.DataFrame) -> pl.DataFrame:
     cached = load_csv_cache(
         CLEAN_CSV,
         expected_cols=_cache_check_cols,
-        min_size_kb=0,
+        min_rows=CACHE_MIN_ROWS,
         infer_schema_length=5000,
     )
-    if cached is not None and cached.height > CACHE_MIN_ROWS:
-        return cached
     if cached is not None:
-        print(f"[WARN] Cache inválido (filas: {cached.height:,}), recalculando...")
+        return cached
 
     df_original = df
     df = _parse_datetime(df)
@@ -312,9 +311,7 @@ def clean(df: pl.DataFrame) -> pl.DataFrame:
 
 
 if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-    from load_data import load_raw
+    from scripts.load_data import load_raw
 
     df_raw = load_raw()
     df_clean = clean(df_raw)
