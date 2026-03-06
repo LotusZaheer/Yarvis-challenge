@@ -7,22 +7,26 @@ Salida  : pl.DataFrame limpio + data/processed/calls_clean.csv
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import polars as pl
 
-# Forzar UTF-8 en stdout para evitar errores en Windows con cp1252
+from utils.paths import PROCESSED_DIR, CLEAN_CSV
+from utils.text import strip_accents
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 # ---------------------------------------------------------------------------
-# Rutas
+# Configuración
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
-CLEAN_CSV = PROCESSED_DIR / "calls_clean.csv"
 
-# ---------------------------------------------------------------------------
-# Campos a extraer de post_call_analysis (prefijo pca_)
-# ---------------------------------------------------------------------------
+DATETIME_FMT = "%Y-%m-%d %H:%M:%S%.f"
+MS_TO_SEC = 1000.0
+P99_QUANTILE = 0.99
+IQR_MULTIPLIER = 1.5
+CACHE_MIN_ROWS = 25000
+
 PCA_FIELDS = [
     "resumen",
     "sentimiento",
@@ -32,73 +36,57 @@ PCA_FIELDS = [
     "dificultad_tecnica",
 ]
 
+EXPECTED_NEW_COLS = [
+    "hour", "day_of_week", "day_of_month", "date",
+    "duration_sec", "duration_outlier",
+    "transcript_text", "transcript_length",
+    "inconsistency_flag",
+    *[f"pca_{f}" for f in PCA_FIELDS],
+]
+
 
 # ---------------------------------------------------------------------------
 # Funciones privadas (cada una recibe y retorna pl.DataFrame)
 # ---------------------------------------------------------------------------
 
 
+DIAS_SEMANA = {1: "lu", 2: "ma", 3: "mi", 4: "ju", 5: "vi", 6: "sa", 7: "do"}
+
+
 def _parse_datetime(df: pl.DataFrame) -> pl.DataFrame:
     """Convierte executed_at a Datetime y extrae features temporales."""
-
-    dias_semana = {
-        1: "lu",
-        2: "ma",
-        3: "mi",
-        4: "ju",
-        5: "vi",
-        6: "sa",
-        7: "do",
-    }
-
-    df = df.with_columns(
+    return df.with_columns(
         pl.col("executed_at")
-        .str.to_datetime("%Y-%m-%d %H:%M:%S%.f", strict=False)
+        .str.to_datetime(DATETIME_FMT, strict=False)
         .alias("executed_at")
-    )
-
-    df = df.with_columns(
+    ).with_columns(
         pl.col("executed_at").dt.hour().alias("hour"),
         pl.col("executed_at").dt.day().alias("day_of_month"),
         pl.col("executed_at").dt.strftime("%d/%m/%Y").alias("date"),
         pl.col("executed_at")
         .dt.weekday()
-        .replace_strict(dias_semana)
+        .replace_strict(DIAS_SEMANA)
         .alias("day_of_week"),
     )
-
-    return df
 
 def _normalize_duration(df: pl.DataFrame) -> pl.DataFrame:
     """Castea duration_ms a Float64, agrega duration_sec y flag de outlier."""
     df = df.with_columns(
         pl.col("duration_ms").cast(pl.Float64, strict=False).alias("duration_ms")
+    ).with_columns(
+        (pl.col("duration_ms") / MS_TO_SEC).alias("duration_sec")
     )
-    df = df.with_columns(
-        (pl.col("duration_ms") / 1000.0).alias("duration_sec")
-    )
-    # Percentil 99 calculado sobre valores no nulos
-    p99 = df["duration_ms"].drop_nulls().quantile(0.99)
-    df = df.with_columns(
+    p99 = df["duration_ms"].drop_nulls().quantile(P99_QUANTILE)
+    return df.with_columns(
         (pl.col("duration_ms") > p99).fill_null(False).alias("duration_outlier")
     )
-    return df
-
-
-# Mapeo compartido de tildes y caracteres especiales
-_TILDE_MAP = {
-    'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
-    'Á': 'a', 'É': 'e', 'Í': 'i', 'Ó': 'o', 'Ú': 'u',
-}
 
 
 def _normalize_pca_value(value: str, space_char: str = "_") -> str:
     """Normaliza un valor PCA: strip, lowercase, sin tildes, espacios→space_char."""
     if not value:
         return None
-    normalized = value.strip().lower()
-    for old, new in _TILDE_MAP.items():
-        normalized = normalized.replace(old, new)
+    normalized = strip_accents(value.strip().lower())
     normalized = normalized.replace(" ", space_char)
     return normalized if normalized else None
 
@@ -174,17 +162,15 @@ def _parse_post_call_analysis(df: pl.DataFrame) -> pl.DataFrame:
 
 def _parse_transcript(df: pl.DataFrame) -> pl.DataFrame:
     """Convierte el transcript JSON a texto plano y agrega longitud."""
-    df = df.with_columns(
+    return df.with_columns(
         pl.col("transcript")
-        .str.json_decode(pl.List(pl.Utf8))  # List[Str]
-        .list.join("\n")                     # texto plano continuo
+        .str.json_decode(pl.List(pl.Utf8))
+        .list.join("\n")
         .str.strip_chars()
         .alias("transcript_text")
-    )
-    df = df.with_columns(
+    ).with_columns(
         pl.col("transcript_text").str.len_chars().alias("transcript_length")
     )
-    return df
 
 
 def _normalize_pca_fields(df: pl.DataFrame) -> pl.DataFrame:
@@ -205,52 +191,78 @@ def _normalize_pca_fields(df: pl.DataFrame) -> pl.DataFrame:
 
 def _add_inconsistency_flag(df: pl.DataFrame) -> pl.DataFrame:
     """Marca registros donde connected != call_completed."""
-    df = df.with_columns(
+    return df.with_columns(
         (pl.col("connected").fill_null(False) != pl.col("call_completed"))
         .alias("inconsistency_flag")
     )
-    return df
 
 
 def _validate(df_original: pl.DataFrame, df_clean: pl.DataFrame) -> None:
     """Valida el DataFrame limpio e imprime advertencias (no interrumpe el pipeline)."""
-    # 1. Row count invariante
     if df_original.height != df_clean.height:
         print(f"[WARN] Filas originales: {df_original.height:,} | Filas limpias: {df_clean.height:,}")
 
-    # 2. Columnas nuevas esperadas
-    expected_new = [
-        "hour", "day_of_week", "day_of_month", "date",
-        "duration_sec", "duration_outlier",
-        "transcript_text", "transcript_length",
-        "inconsistency_flag",
-        *[f"pca_{f}" for f in PCA_FIELDS],
-    ]
-    missing_cols = [c for c in expected_new if c not in df_clean.columns]
+    missing_cols = [c for c in EXPECTED_NEW_COLS if c not in df_clean.columns]
     if missing_cols:
         print(f"[WARN] Columnas faltantes tras limpieza: {missing_cols}")
 
-    # 3. Nulos en executed_at (no deberían existir)
     nulls_dt = df_clean["executed_at"].null_count()
     if nulls_dt > 0:
         print(f"[WARN] {nulls_dt:,} nulos en executed_at tras parseo datetime")
 
-    # 4. Conteo de flags de calidad
-    incons = df_clean["inconsistency_flag"].sum()
-    outliers = df_clean["duration_outlier"].sum()
-    print(f"[INFO] Registros inconsistentes (connected != call_completed): {incons:,}")
-    print(f"[INFO] Outliers de duracion (>p99): {outliers:,}")
+    print(f"[INFO] Registros inconsistentes (connected != call_completed): {df_clean['inconsistency_flag'].sum():,}")
+    print(f"[INFO] Outliers de duracion (>p99): {df_clean['duration_outlier'].sum():,}")
 
-    # 5. Valores válidos en pca_sentimiento
-    if "pca_sentimiento" in df_clean.columns:
-        valid_sentimientos = {"neutral", "negativo", "positivo", None}
-        found = set(df_clean["pca_sentimiento"].unique().to_list())
-        unexpected = found - valid_sentimientos
-        if unexpected:
-            print(f"[WARN] Valores inesperados en pca_sentimiento: {unexpected}")
-        else:
-            sentimiento_dist = df_clean["pca_sentimiento"].value_counts(sort=True)
-            print(f"[INFO] Distribucion pca_sentimiento:\n{sentimiento_dist}")
+    _validate_sentimiento(df_clean)
+
+
+def _validate_sentimiento(df: pl.DataFrame) -> None:
+    """Valida valores de pca_sentimiento."""
+    if "pca_sentimiento" not in df.columns:
+        return
+    valid = {"neutral", "negativo", "positivo", None}
+    found = set(df["pca_sentimiento"].unique().to_list())
+    unexpected = found - valid
+    if unexpected:
+        print(f"[WARN] Valores inesperados en pca_sentimiento: {unexpected}")
+    else:
+        print(f"[INFO] Distribucion pca_sentimiento:\n{df['pca_sentimiento'].value_counts(sort=True)}")
+
+
+def _report_filter(n_before: int, n_after: int, steps: list[tuple[str, int]]) -> None:
+    """Imprime resumen de registros filtrados."""
+    n_filtered = n_before - n_after
+    if n_filtered > 0:
+        pct = n_filtered / n_before * 100
+        print(f"[INFO] Filtro aplicado: {n_filtered:,} registros removidos ({pct:.2f}%)")
+        for label, count in steps:
+            print(f"       → {label}: {count}")
+
+
+def _filter_outliers(df: pl.DataFrame) -> pl.DataFrame:
+    """Filtra hora 0, campaña 'prueba' y outliers de duración (IQR)."""
+    n_before = df.height
+    steps = []
+
+    df = df.filter(pl.col("hour") != 0)
+    steps.append(("hora 0", n_before - df.height))
+
+    prev = df.height
+    if "campaign_type" in df.columns:
+        df = df.filter(pl.col("campaign_type") != "prueba")
+    steps.append(("campaña 'prueba'", prev - df.height))
+
+    q1 = df.select(pl.col("duration_sec").quantile(0.25)).item()
+    q3 = df.select(pl.col("duration_sec").quantile(0.75)).item()
+    iqr = q3 - q1
+    prev = df.height
+    df = df.filter(
+        pl.col("duration_sec").is_between(q1 - IQR_MULTIPLIER * iqr, q3 + IQR_MULTIPLIER * iqr)
+    )
+    steps.append(("outliers duración", prev - df.height))
+
+    _report_filter(n_before, df.height, steps)
+    return df
 
 
 def _export(df: pl.DataFrame) -> None:
@@ -265,65 +277,18 @@ def _export(df: pl.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _filter_outliers(df: pl.DataFrame) -> pl.DataFrame:
-    """
-    Filtra datos no útiles:
-    - Hora 0 (00:00–00:59)
-    - Campaña 'prueba'
-    - Outliers de duración usando método IQR
-    """
-
-    n_before = df.height
-
-    df = df.filter(pl.col("hour") != 0)
-    n_after_h0 = df.height
-
-    if "campaign_type" in df.columns:
-        df = df.filter(pl.col("campaign_type") != "prueba")
-    n_after_prueba = df.height
-
-    q1 = df.select(pl.col("duration_sec").quantile(0.25)).item()
-    q3 = df.select(pl.col("duration_sec").quantile(0.75)).item()
-    iqr = q3 - q1
-
-    lower = q1 - 1.5 * iqr
-    upper = q3 + 1.5 * iqr
-
-    df = df.filter(
-        (pl.col("duration_sec") >= lower) &
-        (pl.col("duration_sec") <= upper)
-    )
-
-    n_after_outliers = df.height
-
-    # Reporte
-    n_filtered = n_before - n_after_outliers
-
-    if n_filtered > 0:
-        pct = n_filtered / n_before * 100
-        print(f"[INFO] Filtro aplicado: {n_filtered:,} registros removidos ({pct:.2f}%)")
-        print(f"       → hora 0: {n_before - n_after_h0}")
-        print(f"       → campaña 'prueba': {n_after_h0 - n_after_prueba}")
-        print(f"       → outliers duración: {n_after_prueba - n_after_outliers}")
-
-    return df
-
-
 def clean(df: pl.DataFrame) -> pl.DataFrame:
     """
     Limpia y normaliza el DataFrame crudo.
     Si calls_clean.csv ya existe y tiene las columnas esperadas, lo carga directamente.
     No muta la entrada; retorna un nuevo DataFrame enriquecido.
     """
-    _expected = ["hour", "day_of_week", "duration_sec", "transcript_text", "inconsistency_flag"]
+    _cache_check_cols = ["hour", "day_of_week", "duration_sec", "transcript_text", "inconsistency_flag"]
 
-    # Cache check: validar que exista y tenga el tamaño esperado
-    # (después de filtrado: ~73,330 registros)
-    cache_min_size = 25000  # Aproximación tras filtrar hora 0 y prueba
     if CLEAN_CSV.exists():
         df_cached = pl.read_csv(CLEAN_CSV, infer_schema_length=5000)
-        if (all(c in df_cached.columns for c in _expected) and
-            df_cached.height > cache_min_size):
+        if (all(c in df_cached.columns for c in _cache_check_cols) and
+            df_cached.height > CACHE_MIN_ROWS):
             print(f"[INFO] Cache encontrado: {CLEAN_CSV.name} ({df_cached.height:,} filas)")
             return df_cached
         print(f"[WARN] Cache invalido (filas: {df_cached.height:,}), recalculando...")

@@ -5,18 +5,20 @@ Entrada : pl.DataFrame limpio (con columna transcript_text)
 Salida  : pl.DataFrame con columna sentiment_own (negativo/neutral/positivo)
 """
 
-import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import polars as pl
+
+from utils.paths import CLEAN_CSV, PROCESSED_DIR
+from utils.text import normalize_text
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CLEAN_CSV = PROJECT_ROOT / "data" / "processed" / "calls_clean.csv"
-SENTIMENT_CACHE = PROJECT_ROOT / "data" / "processed" / "cache_sentiment.csv"
+SENTIMENT_CACHE = PROCESSED_DIR / "cache_sentiment.csv"
 
 # ---------------------------------------------------------------------------
 # Léxico español para contexto de atención al cliente
@@ -63,14 +65,8 @@ _NEGATIVE_PHRASES = [
     "me voy a cambiar", "me tienen harto", "no me cobren mas",
 ]
 
-_RE_PUNCT = re.compile(r"[^\w\s]")
-_RE_ACCENTS = str.maketrans("áéíóúüñ", "aeiooun")
-
-
 def _normalize(text: str) -> str:
-    text = text.lower().translate(_RE_ACCENTS)
-    text = _RE_PUNCT.sub(" ", text)
-    return text
+    return normalize_text(text)
 
 
 def _extract_user_text(transcript: str) -> str:

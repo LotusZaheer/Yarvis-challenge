@@ -5,33 +5,29 @@ Salida  : pl.DataFrame con columnas de flags de desempeño + figura en reports/f
           (no exporta CSV separado; los hallazgos van al reporte)
 """
 
-import re
 import sys
 from collections import Counter
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import matplotlib.pyplot as plt
 import polars as pl
+
+from utils.paths import CLEAN_CSV, FIGURES_DIR, PROCESSED_DIR
+from utils.text import normalize_text
+from utils.plotting import savefig
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CLEAN_CSV = PROJECT_ROOT / "data" / "processed" / "calls_clean.csv"
-FIGURES_DIR = PROJECT_ROOT / "reports" / "figures"
-AGENT_CACHE = PROJECT_ROOT / "data" / "processed" / "cache_agent.csv"
+AGENT_CACHE = PROCESSED_DIR / "cache_agent.csv"
 
 # Umbral de duración corta (segundos) para clasificar llamadas tipo "malentendido"
 SHORT_CALL_THRESHOLD_SEC = 30.0
 
-_RE_PUNCT = re.compile(r"[^\w\s]")
-_RE_ACCENTS = str.maketrans("áéíóúüñÁÉÍÓÚÜÑ", "aeiouunAEIOUUN")
-
-
 def _normalize_phrase(text: str) -> str:
-    return _RE_PUNCT.sub(" ", text.lower().translate(_RE_ACCENTS)).strip()
+    return normalize_text(text)
 
 
 def _extract_agent_lines(transcript: str) -> list[str]:
@@ -152,9 +148,7 @@ def _plot_failures(df: pl.DataFrame, out_path: Path):
             ha="center", va="bottom", fontsize=9,
         )
     ax.set_ylim(0, max(pcts) * 1.3 if any(p > 0 for p in pcts) else 0.1)
-    plt.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
+    savefig(fig, out_path)
 
 
 def analyze_agent_performance(df: pl.DataFrame) -> pl.DataFrame:

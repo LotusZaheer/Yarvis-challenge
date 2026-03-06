@@ -1,23 +1,25 @@
 """
 Script 01 - Carga y validación inicial del CSV de llamadas.
 Entrada : data/raw/data_calls.csv
-Salida  : pd.DataFrame validado (listo para etapa de limpieza)
+Salida  : pl.DataFrame validado (listo para etapa de limpieza)
 """
 
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import polars as pl
 
-# ---------------------------------------------------------------------------
-# Rutas
-# ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_CSV = PROJECT_ROOT / "data" / "raw" / "data_calls.csv"
+from utils.paths import RAW_CSV
 
 # ---------------------------------------------------------------------------
-# Esquema esperado: nombre original → nombre normalizado (snake_case)
+# Configuración
 # ---------------------------------------------------------------------------
+SEPARATOR = ","
+NULL_VALUES = ["NULL", "NaN", "nan", ""]
+
+# Esquema esperado: nombre original → nombre normalizado (snake_case)
 COLUMN_RENAME = {
     "Campaign Id": "campaign_id",
     "Name": "name",
@@ -32,35 +34,38 @@ COLUMN_RENAME = {
 }
 
 
-def load_raw(path: Path = RAW_CSV) -> pl.DataFrame:
-    """
-    Lee el CSV con separador coma, renombra columnas a snake_case
-    y ejecuta validaciones básicas de estructura.
-    """
-    if not path.exists():
-        sys.exit(f"[ERROR] Archivo no encontrado: {path}")
-
-    # Carga con polars indicando que "NULL" representa valor nulo
-    df = pl.read_csv(path, separator=",", null_values=["NULL", "NaN", "nan", ""])
-
-    # --- Validar columnas esperadas ---
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def _validate_columns(df: pl.DataFrame) -> None:
+    """Verifica que el CSV contenga todas las columnas esperadas."""
     missing = set(COLUMN_RENAME.keys()) - set(df.columns)
     if missing:
         sys.exit(f"[ERROR] Columnas faltantes en el CSV: {missing}")
 
-    # Renombrar
-    df = df.rename(COLUMN_RENAME)
 
-    # --- Columna derivada: llamada efectuada ---
-    # Si call_url tiene valor, la llamada logro conectar; si es nulo, no conecto
-    df = df.with_columns(
+def _add_derived_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Agrega columnas calculadas a partir de las existentes."""
+    return df.with_columns(
         pl.col("call_url").is_not_null().alias("call_completed")
     )
 
 
-    # --- Reporte mínimo: solo conteo ---
-    print(f"[INFO] Registros cargados: {df.height:,}")
+# ---------------------------------------------------------------------------
+# Función principal
+# ---------------------------------------------------------------------------
+def load_raw(path: Path = RAW_CSV) -> pl.DataFrame:
+    """Lee el CSV, renombra columnas a snake_case y valida estructura."""
+    if not path.exists():
+        sys.exit(f"[ERROR] Archivo no encontrado: {path}")
 
+    df = pl.read_csv(path, separator=SEPARATOR, null_values=NULL_VALUES)
+
+    _validate_columns(df)
+    df = df.rename(COLUMN_RENAME)
+    df = _add_derived_columns(df)
+
+    print(f"[INFO] Registros cargados: {df.height:,}")
     return df
 
 
