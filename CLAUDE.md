@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 ## Pipeline
-CSV único → carga y validación → limpieza y normalización → EDA → clustering de contactos conectados + análisis de sentimiento propio → evaluación de desempeño del agente de IA → generación de entregables (PDF de reporte, CSVs de clústeres, PDF de métodos técnicos, código).
+CSV único → `load_data` → `clean_data` → `sentiment_analysis` → `contactability` → `cluster_contacts` → `agent_performance` → entregables (PDF, CSVs, código).
 
 ## Reglas esenciales
 - Cada vez que reciba el prompt "commit": revisa los Staged Changes, determina cómo los cambios afectan `PROJECT_REVIEW.md` y actualízalo solo si es necesario (ignorando `sanity_checks/` y `logs/`), y **SUGIERE** un nombre de commit en inglés impreso en consola. No hagas el commit — el usuario lo hará manualmente.
@@ -21,31 +21,35 @@ CSV único → carga y validación → limpieza y normalización → EDA → clu
 project/
 ├── data/
 │   ├── raw/           # CSV original, inmutable
+│   ├── interim/       # Outputs de sanity_checks (logs, muestras, gráficos exploratorios)
 │   └── processed/     # CSVs limpios y clústeres de salida
 ├── sanity_checks/     # Exploración y análisis interactivo (scripts numerados)
 ├── scripts/           # Módulos del pipeline (load_data, clean_data, etc.)
-├── utils/             # Código reutilizable entre main.py y main.ipynb (display, helpers, etc.)
-├── reports/           # PDFs generados
+├── utils/             # Código reutilizable entre main.py y main.ipynb
+├── reports/
+│   └── figures/       # Figuras generadas por scripts (PNG)
+├── archive/           # Scripts deprecados (versiones anteriores de módulos)
 ├── models/            # Modelos serializados (si aplica)
 └── .claude/
     └── skills/
 ```
 
 ## Estado del proyecto
-**Fase:** Etapa 1 completada — Carga y validación inicial.
+**Fase:** Pipeline completo — análisis, clustering, sentimiento, desempeño y entregables generados.
 
-### Completado
-- `scripts/load_data.py`: carga CSV con polars, renombra columnas a snake_case, valida columnas esperadas, crea columna derivada `call_completed`, exporta muestra de inconsistencias a `data/processed/`.
-- `main.py`: punto de entrada del pipeline, muestra resumen visual con `rich`.
-- `requeriments.txt`: dependencias versionadas (`>=`), sin pandas.
+### Módulos del pipeline (`scripts/`)
+- `load_data.py` — carga CSV, renombra columnas a snake_case, valida, crea `call_completed`
+- `clean_data.py` — limpieza, normalización, columnas derivadas (hora, día, outliers, PCA)
+- `sentiment_analysis.py` — clasificador de sentimiento basado en reglas
+- `contactability.py` — métricas de contactabilidad, 14 figuras, score compuesto
+- `cluster_contacts.py` — KMeans (K=4) sobre llamadas conectadas
+- `agent_performance.py` — detección de fallas del agente (inactividad, repetición, objeciones)
 
-### Pendiente
-- Limpieza y normalización avanzada
-- EDA y visualizaciones
-- Clustering de contactos conectados
-- Análisis de sentimiento propio
-- Evaluación de desempeño del agente de IA
-- Generación de entregables (PDFs, CSVs finales)
+### Entregables
+- `main.py` / `main.ipynb` — ejecución del pipeline y visualización de resultados
+- `reports/reporte_hallazgos.tex` — reporte de hallazgos (LaTeX)
+- `reports/metodos_tecnicos.md` — documentación de métodos
+- `data/processed/clusters_contacts.csv` — asignación de clusters
 
 ## Skills de referencia
 - `.claude/skills/architecture/pipeline.md`
