@@ -2,6 +2,14 @@
 
 Análisis de ~73,000 registros de llamadas salientes de un agente de voz IA. Incluye limpieza, clustering, análisis de sentimiento, contactabilidad y evaluación de desempeño.
 
+## Datos
+
+El archivo de llamadas **no está incluido en el repositorio**. Antes de ejecutar el pipeline, coloca el CSV en:
+
+```
+data/raw/data_calls.csv
+```
+
 ## Requisitos
 
 - Python 3.12+
