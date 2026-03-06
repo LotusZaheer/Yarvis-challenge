@@ -85,6 +85,44 @@ def _normalize_duration(df: pl.DataFrame) -> pl.DataFrame:
     return df
 
 
+# Mapeo compartido de tildes y caracteres especiales
+_TILDE_MAP = {
+    'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
+    'Á': 'a', 'É': 'e', 'Í': 'i', 'Ó': 'o', 'Ú': 'u',
+}
+
+
+def _normalize_pca_value(value: str, space_char: str = "_") -> str:
+    """Normaliza un valor PCA: strip, lowercase, sin tildes, espacios→space_char."""
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    for old, new in _TILDE_MAP.items():
+        normalized = normalized.replace(old, new)
+    normalized = normalized.replace(" ", space_char)
+    return normalized if normalized else None
+
+
+def _normalize_pca_razon_churn(value: str) -> str:
+    """Normaliza pca_razon_churn con alias específicos."""
+    normalized = _normalize_pca_value(value, space_char="_")
+    if not normalized:
+        return None
+
+    # Alias y unificación conceptual
+    alias_map = {
+        "no_supo_recargar": "no_sabe_recargar",  # unificar variantes
+        "no_recarga": "no_sabe_recargar",
+        "fallos_(caida_del_servicio_o_servicio_mal_instalado)": "fallas_(caida_del_servicio_o_servicio_mal_instalado)",
+    }
+    return alias_map.get(normalized, normalized)
+
+
+def _normalize_pca_posible_recuperacion(value: str) -> str:
+    """Normaliza pca_posible_recuperacion: lowercase, sin tildes."""
+    return _normalize_pca_value(value, space_char="_")
+
+
 def _normalize_categoricals(df: pl.DataFrame) -> pl.DataFrame:
     """Normaliza columnas categóricas: tipos, trim y lowercase donde aplica."""
     df = df.with_columns(
@@ -146,6 +184,22 @@ def _parse_transcript(df: pl.DataFrame) -> pl.DataFrame:
     df = df.with_columns(
         pl.col("transcript_text").str.len_chars().alias("transcript_length")
     )
+    return df
+
+
+def _normalize_pca_fields(df: pl.DataFrame) -> pl.DataFrame:
+    """Normaliza columnas pca_* categóricas: tildes, espacios→guiones, lowercase."""
+    cols_to_normalize = {
+        "pca_razon_churn": _normalize_pca_razon_churn,
+        "pca_posible_recuperacion": _normalize_pca_posible_recuperacion,
+    }
+    for col, normalize_fn in cols_to_normalize.items():
+        if col in df.columns:
+            df = df.with_columns(
+                pl.col(col)
+                .map_elements(normalize_fn, return_dtype=pl.Utf8)
+                .alias(col)
+            )
     return df
 
 
@@ -279,6 +333,7 @@ def clean(df: pl.DataFrame) -> pl.DataFrame:
     df = _normalize_duration(df)
     df = _normalize_categoricals(df)
     df = _parse_post_call_analysis(df)
+    df = _normalize_pca_fields(df)
     df = _parse_transcript(df)
     df = _add_inconsistency_flag(df)
     df = _filter_outliers(df)
