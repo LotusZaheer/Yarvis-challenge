@@ -1,4 +1,5 @@
 env/
+venv/
 .claude/
 *.csv
 __pycache__
